@@ -1,0 +1,17 @@
+{
+  "name": "langgraph-learning-lab-typescript",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx 01-hello-graph.ts"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
+
