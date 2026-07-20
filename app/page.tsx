@@ -1212,7 +1212,7 @@ function Playground({ language, setLanguage }: { language: Language; setLanguage
     setStatus("loading");
 
     const worker = language === "python"
-      ? new Worker("/py-runner.mjs", { type: "module" })
+      ? new Worker(new URL("./workers/py-runner.ts", import.meta.url), { type: "module" })
       : new Worker(new URL("./workers/ts-runner.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
     const id = Date.now();

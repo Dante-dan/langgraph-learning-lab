@@ -62,7 +62,7 @@ test("keeps the core technical boundaries explicit in source and styles", async 
   assert.match(page, /业务终止条件负责正常退出/);
   assert.match(page, /Graph API：State \/ Nodes \/ Edges \/ super-steps/);
   assert.match(page, /window\.addEventListener\("hashchange", syncRoute\)/);
-  assert.match(page, /new Worker\("\/py-runner\.mjs", \{ type: "module" \}\)/);
+  assert.match(page, /new Worker\(new URL\("\.\/workers\/py-runner\.ts", import\.meta\.url\), \{ type: "module" \}\)/);
   assert.match(page, /Compile & Run/);
   assert.doesNotMatch(page, /播放预设执行轨迹/);
 
