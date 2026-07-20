@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "hello": "tsx 01-hello-graph.ts"
+    "hello": "tsx 01-hello-graph.ts",
+    "weather": "tsx 02-weather-route.ts"
   },
   "dependencies": {
     "@langchain/langgraph": "latest",
@@ -14,4 +15,3 @@
     "typescript": "latest"
   }
 }
-

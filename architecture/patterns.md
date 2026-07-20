@@ -10,6 +10,17 @@
 6. 是否需要外部授权？在副作用前 interrupt。
 7. 是否跨分钟、小时或天？使用 checkpoint、幂等副作用和可恢复部署。
 
+## 先分层，再选图模式
+
+```text
+Transport       HTTP / SSE / WebSocket、鉴权、限流、序列化
+Application     选择 graph、thread_id、invoke/stream、错误映射
+Graph runtime   State、Node、Edge、loop、interrupt
+Infrastructure  LLM、工具、业务 API、checkpointer、store、observability
+```
+
+LangGraph 负责第三层的控制与状态运行时，不替代完整 Web 架构。固定两三步且无需恢复时，普通函数或 Runnable 更简单。
+
 ## 生产清单
 
 - State 字段有清晰所有者、类型与 reducer。
@@ -22,4 +33,3 @@
 - 长期记忆与 checkpoint 分开建模。
 - 对关键路径保存 trace、延迟、token 与失败原因。
 - 子图按领域或生命周期切分，而不是按“Agent 人设”堆叠。
-

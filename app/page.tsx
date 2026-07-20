@@ -5,10 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type Language = "python" | "typescript";
 type SectionKey =
   | "roadmap"
+  | "requestflow"
+  | "controlflow"
   | "quickstart"
   | "concepts"
   | "dataflow"
   | "api"
+  | "toyagent"
   | "playground"
   | "patterns"
   | "project";
@@ -20,14 +23,17 @@ const SECTIONS: Array<{
   group: string;
   duration: string;
 }> = [
-  { key: "roadmap", num: "01", label: "学习路线", group: "怎么开始", duration: "5 MIN" },
-  { key: "quickstart", num: "02", label: "创建第一个项目", group: "怎么开始", duration: "12 MIN" },
-  { key: "concepts", num: "03", label: "StateGraph 与状态", group: "核心概念", duration: "18 MIN" },
-  { key: "dataflow", num: "04", label: "数据流与序列化", group: "深入工作流", duration: "16 MIN" },
-  { key: "api", num: "05", label: "常用 API 图鉴", group: "深入工作流", duration: "14 MIN" },
-  { key: "playground", num: "06", label: "执行 Playground", group: "动手练习", duration: "20 MIN" },
-  { key: "patterns", num: "07", label: "业界架构模式", group: "系统设计", duration: "22 MIN" },
-  { key: "project", num: "08", label: "GitHub 实战项目", group: "系统设计", duration: "25 MIN" },
+  { key: "roadmap", num: "01", label: "先看系统全貌", group: "从全貌开始", duration: "8 MIN" },
+  { key: "requestflow", num: "02", label: "一次请求的旅程", group: "从全貌开始", duration: "18 MIN" },
+  { key: "controlflow", num: "03", label: "顺序、分支与循环", group: "从全貌开始", duration: "24 MIN" },
+  { key: "quickstart", num: "04", label: "天气出行项目", group: "第一个完整程序", duration: "18 MIN" },
+  { key: "concepts", num: "05", label: "逐个定义核心构件", group: "拆开每个零件", duration: "22 MIN" },
+  { key: "dataflow", num: "06", label: "数据流与序列化", group: "拆开每个零件", duration: "20 MIN" },
+  { key: "api", num: "07", label: "API 的调用时机", group: "组合成运行时", duration: "20 MIN" },
+  { key: "toyagent", num: "08", label: "Toy Agent 运行时", group: "组合成运行时", duration: "28 MIN" },
+  { key: "playground", num: "09", label: "逐步执行 Playground", group: "动手验证", duration: "20 MIN" },
+  { key: "patterns", num: "10", label: "架构模式与取舍", group: "放进真实系统", duration: "25 MIN" },
+  { key: "project", num: "11", label: "GitHub 实战项目", group: "放进真实系统", duration: "25 MIN" },
 ];
 
 const snippets: Record<string, Record<Language, string>> = {
@@ -68,6 +74,234 @@ const graph = new StateGraph(State)
   .compile();
 
 console.log(await graph.invoke({ topic: "LangGraph" }));`,
+  },
+  weather: {
+    python: `from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+
+class TripState(TypedDict, total=False):
+    origin: str
+    destination: str
+    latitude: float
+    longitude: float
+    temperature: float
+    weather_code: int
+    route_plan: str
+
+async def check_weather(state: TripState):
+    params = {"latitude": state["latitude"], "longitude": state["longitude"],
+              "current": "temperature_2m,weather_code"}
+    async with httpx.AsyncClient() as client:
+        data = (await client.get("https://api.open-meteo.com/v1/forecast",
+                                 params=params)).json()
+    return {"temperature": data["current"]["temperature_2m"],
+            "weather_code": data["current"]["weather_code"]}
+
+def plan_route(state: TripState):
+    mode = "地铁优先" if state["weather_code"] >= 51 else "步行 + 公交"
+    return {"route_plan": f"{state['origin']} → {state['destination']}：{mode}"}
+
+graph = (StateGraph(TripState)
+    .add_node("check_weather", check_weather)
+    .add_node("plan_route", plan_route)
+    .add_edge(START, "check_weather")
+    .add_edge("check_weather", "plan_route")
+    .add_edge("plan_route", END)
+    .compile())
+
+result = await graph.ainvoke({"origin": "公司", "destination": "机场",
+                              "latitude": 31.23, "longitude": 121.47})`,
+    typescript: `import { StateGraph, StateSchema, START, END } from "@langchain/langgraph";
+import * as z from "zod";
+
+const TripState = new StateSchema({
+  origin: z.string(), destination: z.string(),
+  latitude: z.number(), longitude: z.number(),
+  temperature: z.number().default(0),
+  weatherCode: z.number().default(0),
+  routePlan: z.string().default(""),
+});
+
+const checkWeather: typeof TripState.Node = async (state) => {
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.search = new URLSearchParams({
+    latitude: String(state.latitude), longitude: String(state.longitude),
+    current: "temperature_2m,weather_code",
+  }).toString();
+  const data = await fetch(url).then((r) => r.json());
+  return { temperature: data.current.temperature_2m,
+           weatherCode: data.current.weather_code };
+};
+
+const planRoute: typeof TripState.Node = (state) => ({
+  routePlan: state.weatherCode >= 51 ? "地铁优先" : "步行 + 公交",
+});
+
+export const graph = new StateGraph(TripState)
+  .addNode("check_weather", checkWeather).addNode("plan_route", planRoute)
+  .addEdge(START, "check_weather").addEdge("check_weather", "plan_route")
+  .addEdge("plan_route", END).compile();
+
+const result = await graph.invoke({
+  origin: "公司", destination: "机场", latitude: 31.23, longitude: 121.47,
+});`,
+  },
+  http: {
+    python: `class TripRequest(BaseModel):
+    origin: str
+    destination: str
+    latitude: float
+    longitude: float
+
+@app.post("/api/trips/plan")
+async def plan_trip(body: TripRequest, x_request_id: str | None = Header(None)):
+    request_id = x_request_id or str(uuid4())
+    result = await graph.ainvoke(
+        body.model_dump(),
+        {"configurable": {"thread_id": request_id}},
+    )
+    return {"request_id": request_id, "data": result}
+
+# 流式接口：async for update in graph.astream(input, stream_mode="updates")
+# 将每个 update 编码成 JSON，写入 SSE / NDJSON / WebSocket。`,
+    typescript: `const TripRequest = z.object({
+  origin: z.string().min(1), destination: z.string().min(1),
+  latitude: z.number(), longitude: z.number(),
+});
+
+export async function POST(request: Request) {
+  const input = TripRequest.parse(await request.json());
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const result = await graph.invoke(input, {
+    configurable: { thread_id: requestId },
+  });
+  return Response.json({ requestId, data: result });
+}
+
+// 流式接口：for await (const update of await graph.stream(input,
+//   { streamMode: "updates" })) socket.send(JSON.stringify(update));`,
+  },
+  branch: {
+    python: `def choose(state) -> Literal["reject", "human_review", "execute"]:
+    if not state["approved"]:       # 第一层：No
+        return "reject"
+    if state["risk"] == "high":    # 第二层：嵌套判断
+        return "human_review"
+    return "execute"
+
+builder.add_conditional_edges("validate", choose)
+builder.add_edge("reject", END)
+builder.add_edge("human_review", END)
+builder.add_edge("execute", END)`,
+    typescript: `const choose = (state: typeof RouteState.State) => {
+  if (!state.approved) return "reject";
+  if (state.risk === "high") return "human_review";
+  return "execute";
+};
+
+builder.addConditionalEdges("validate", choose);
+builder.addEdge("reject", END);
+builder.addEdge("human_review", END);
+builder.addEdge("execute", END);`,
+  },
+  llmRouter: {
+    python: `class Decision(BaseModel):
+    next: Literal["walk", "transit", "clarify"]
+    reason: str
+
+router = model.with_structured_output(Decision)
+
+async def decide(state):
+    decision = await router.ainvoke(
+        f"天气={state['weather']}; 距离={state['distance_km']}km"
+    )
+    return {"decision": decision.next, "reason": decision.reason}
+
+builder.add_node("decide", decide)
+builder.add_conditional_edges("decide", lambda state: state["decision"])
+
+# 权限、额度、危险操作仍由确定性代码复核。`,
+    typescript: `const Decision = z.object({
+  next: z.enum(["walk", "transit", "clarify"]),
+  reason: z.string(),
+});
+const router = model.withStructuredOutput(Decision);
+
+const decide = async (state: RouteState) => {
+  const decision = await router.invoke(
+    "天气=" + state.weather + "; 距离=" + state.distanceKm + "km"
+  );
+  return { decision: decision.next, reason: decision.reason };
+};
+
+builder.addNode("decide", decide);
+builder.addConditionalEdges("decide", (state) => state.decision);
+
+// 权限、额度、危险操作仍由确定性代码复核。`,
+  },
+  loop: {
+    python: `def continue_or_stop(state):
+    if state["accepted"] or state["attempts"] >= 3:
+        return END
+    return "generate"
+
+graph = (StateGraph(DraftState)
+    .add_node("generate", generate)
+    .add_node("evaluate", evaluate)
+    .add_edge(START, "generate")
+    .add_edge("generate", "evaluate")
+    .add_conditional_edges("evaluate", continue_or_stop)
+    .compile())
+
+result = graph.invoke(input, {"recursion_limit": 10})`,
+    typescript: `const continueOrStop = (state: typeof DraftState.State) =>
+  state.accepted || state.attempts >= 3 ? END : "generate";
+
+const graph = new StateGraph(DraftState)
+  .addNode("generate", generate)
+  .addNode("evaluate", evaluate)
+  .addEdge(START, "generate")
+  .addEdge("generate", "evaluate")
+  .addConditionalEdges("evaluate", continueOrStop)
+  .compile();
+
+const result = await graph.invoke(input, { recursionLimit: 10 });`,
+  },
+  toyAgent: {
+    python: `tools = [get_weather, search_route]
+model_with_tools = model.bind_tools(tools)
+
+async def call_model(state: MessagesState):
+    reply = await model_with_tools.ainvoke(state["messages"])
+    return {"messages": [reply]}
+
+def route_after_model(state: MessagesState):
+    return "tools" if state["messages"][-1].tool_calls else END
+
+graph = (StateGraph(MessagesState)
+    .add_node("model", call_model)
+    .add_node("tools", ToolNode(tools))
+    .add_edge(START, "model")
+    .add_conditional_edges("model", route_after_model)
+    .add_edge("tools", "model")
+    .compile(checkpointer=checkpointer))`,
+    typescript: `const tools = [getWeather, searchRoute];
+const modelWithTools = model.bindTools(tools);
+
+const callModel = async (state: AgentState) => ({
+  messages: [await modelWithTools.invoke(state.messages)],
+});
+
+const routeAfterModel = (state: AgentState) =>
+  state.messages.at(-1)?.tool_calls?.length ? "tools" : END;
+
+const graph = new StateGraph(AgentState)
+  .addNode("model", callModel)
+  .addNode("tools", new ToolNode(tools))
+  .addEdge(START, "model")
+  .addConditionalEdges("model", routeAfterModel)
+  .addEdge("tools", "model")
+  .compile({ checkpointer });`,
   },
   reducer: {
     python: `import operator
@@ -303,15 +537,26 @@ function Principle({ title, children }: { title: string; children: React.ReactNo
 }
 
 function SectionHeader({ section }: { section: typeof SECTIONS[number] }) {
+  const titles: Record<SectionKey, string> = {
+    roadmap: "先看全貌，再看每个零件",
+    requestflow: "一次请求，如何真正穿过 LangGraph",
+    controlflow: "顺序、分支、循环：程序如何动起来",
+    quickstart: "第一个完整程序：天气出行助手",
+    concepts: "逐个定义 State、Node、Edge 与 Reducer",
+    dataflow: "数据怎样流转、序列化与恢复",
+    api: "API 不只是列表，而是调用时机",
+    toyagent: "Toy Agent：模型、工具、验证与循环",
+    playground: "逐节点观察一次天气请求",
+    patterns: "架构模式：为什么这样选",
+    project: "把理解固化进公开 GitHub 项目",
+  };
   return (
     <header className="lesson-head">
       <div>
         <div className="lesson-index">LESSON {section.num}</div>
-        <h1>{section.key === "roadmap" ? "先看地图，再写第一个节点" : section.label}</h1>
+        <h1>{titles[section.key]}</h1>
         <p className="subtitle">
-          {section.key === "roadmap"
-            ? "用一张可执行的知识地图，理解 LangGraph 如何把状态、节点与边组合成可追踪、可恢复、可持续演进的 Agent 系统。"
-            : "先抓住工作机制，再用双语言代码、执行轨迹和练习把概念真正跑通。"}
+          从请求边界、控制流和 State diff 出发；每一节都回答输入是什么、节点做了什么、为何这样流转、如何结束。
         </p>
       </div>
       <div className="duration">预计 {section.duration} · 入门</div>
@@ -324,29 +569,95 @@ function Roadmap() {
     <>
       <section className="intro-grid">
         <div className="prose">
-          <h2>LangGraph 的一句话心智模型</h2>
-          <p><code>State</code> 是共享事实，<code>Node</code> 读取并产生局部更新，<code>Edge</code> 决定下一步，<code>Reducer</code> 解决并发更新如何合并。</p>
-          <p>它不是“另一个聊天 SDK”，而是低层 Agent 编排运行时：当任务需要循环、持久化、流式输出、人工介入或长时间运行时，图结构才真正开始产生价值。</p>
+          <h2>先把 LangGraph 当成一个程序</h2>
+          <p>一个程序由数据、计算和控制流组成。LangGraph 只是把它们显式化：<code>State</code> 是带类型的数据，<code>Node</code> 是计算函数，<code>Edge</code> 是顺序/条件/循环，<code>Reducer</code> 是并发数据的合并规则。</p>
+          <p>真正的系统还要再包两层：外层是 HTTP、WebSocket、鉴权和序列化；内层是模型、工具、数据库与 checkpoint。只看一张图，当然不知道用户输入从哪里来。</p>
           <div className="formula">
-            <Principle title="STATE">共享的数据契约</Principle>
-            <Principle title="NODES">可测试的计算单元</Principle>
-            <Principle title="EDGES">明确的流转规则</Principle>
+            <Principle title="DATA">State / schema</Principle>
+            <Principle title="COMPUTE">Node / tool / model</Principle>
+            <Principle title="CONTROL">Edge / branch / loop</Principle>
           </div>
         </div>
-        <BlueprintGraph active={2} />
+        <BlueprintGraph active={1} />
       </section>
+      <div className="system-layers">
+        <div><strong>01 · 接入层</strong><span>HTTP / SSE / WebSocket → 鉴权 → schema 校验</span></div>
+        <div><strong>02 · 应用层</strong><span>选择 graph、thread_id、invoke / stream、错误映射</span></div>
+        <div><strong>03 · 图运行时</strong><span>START → Node → State update → Edge → END</span></div>
+        <div><strong>04 · 基础设施</strong><span>LLM、工具、业务 API、checkpointer、store、观测</span></div>
+      </div>
       <section className="route-map">
-        <div className="section-kicker">90 MIN · LEARNING ROUTE</div>
-        <h2>从可运行的最小图，走到可靠的系统</h2>
+        <div className="section-kicker">TEXTBOOK ROUTE · 全貌 → 过程 → 定义 → 组合</div>
+        <h2>让每一个相邻概念都自然衍生出下一节</h2>
         <div className="route-steps">
           {SECTIONS.slice(1).map((item, index) => (
             <div className="route-step" key={item.key}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.label}</strong><small>{item.duration}</small></div>
           ))}
         </div>
       </section>
-      <div className="decision-callout"><strong>什么时候不要用 LangGraph？</strong><span>一次模型调用、固定两三步且没有恢复/循环需求时，普通函数或 LangChain Runnable 更简单。</span></div>
+      <div className="decision-callout"><strong>贯穿全站的问题</strong><span>一次“公司到机场怎么走”的请求如何进入系统、如何查天气、如何分支、如何循环验证、怎样流式返回，以及何时根本不该使用 LangGraph。</span></div>
     </>
   );
+}
+
+function RequestFlow({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
+  const steps = [
+    ["01", "Client", "POST /api/trips/plan", "JSON bytes"],
+    ["02", "Router", "反序列化、鉴权、schema 校验", "TripInput"],
+    ["03", "invoke", "input 成为初始 State；START 激活首节点", "checkpoint #0"],
+    ["04", "check_weather", "读取坐标，调用 Open-Meteo", "+ weather"],
+    ["05", "route", "按天气/距离选择下一节点", "branch"],
+    ["06", "END", "没有待执行节点，形成 final State", "checkpoint #N"],
+    ["07", "Router", "挑选公开字段，序列化响应", "HTTP JSON"],
+  ];
+  return <>
+    <div className="sequence-board">
+      <div className="sequence-head"><span>REQUEST LIFECYCLE</span><span>一次请求像“地址栏输入网址”一样逐层展开</span></div>
+      {steps.map((step) => <div className="sequence-row" key={step[0]}><span>{step[0]}</span><strong>{step[1]}</strong><b>{step[2]}</b><code>{step[3]}</code></div>)}
+    </div>
+    <div className="wire-grid">
+      <div><span>REQUEST JSON</span><pre>{`{
+  "origin": "公司",
+  "destination": "机场",
+  "latitude": 31.23,
+  "longitude": 121.47
+}`}</pre></div>
+      <div><span>RESPONSE JSON</span><pre>{`{
+  "requestId": "trip-42",
+  "data": {
+    "temperature": 29.4,
+    "weatherCode": 61,
+    "routePlan": "地铁优先"
+  }
+}`}</pre></div>
+    </div>
+    <CodeBlock name="http" language={language} setLanguage={setLanguage} label="接入层：请求校验 → graph.invoke → JSON 响应" />
+    <div className="compare-grid">
+      <div><span className="section-kicker">HTTP</span><h3>等待最终结果</h3><p><code>invoke</code> 到 END 后一次返回，最适合短任务 REST。</p></div>
+      <div><span className="section-kicker">SSE / NDJSON</span><h3>单向推送进度</h3><p>消费 <code>stream</code>，把每个 update 编码成 JSON event。</p></div>
+      <div><span className="section-kicker">WebSocket</span><h3>双向会话</h3><p>连接层管理消息；socket 不进 State，同一会话靠 <code>thread_id</code>。</p></div>
+    </div>
+  </>;
+}
+
+function ControlFlow({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
+  return <>
+    <div className="control-overview">
+      <article><span>SEQUENCE</span><h3>顺序</h3><code>A → B → C</code><p>下一步在编译时已知，用固定 edge。</p></article>
+      <article><span>BRANCH</span><h3>条件</h3><code>A → if(state) → B/C</code><p>下一步由当前 State 决定，用 conditional edge。</p></article>
+      <article><span>LOOP</span><h3>循环</h3><code>A → evaluate → A/END</code><p>条件边可以指回旧节点，但必须有退出条件。</p></article>
+    </div>
+    <h2 className="section-title">确定性分支：Yes / No 与嵌套判断</h2>
+    <p>权限、距离、额度和枚举状态能被代码精确判断。嵌套 if 不需要嵌套图：路由函数只读 State，返回目标节点名；节点做业务，边做路由。</p>
+    <CodeBlock name="branch" language={language} setLanguage={setLanguage} label="确定性条件边" />
+    <h2 className="section-title">LLM 分支：只处理语义模糊，不处理硬权限</h2>
+    <p>“用户更想步行还是公共交通”可由模型判断，但输出必须限制为枚举。LLM 先写 <code>decision</code>，纯路由函数再读取它；预算、权限和危险动作仍由代码复核。</p>
+    <CodeBlock name="llmRouter" language={language} setLanguage={setLanguage} label="Structured output → 条件边" />
+    <h2 className="section-title">Loop：回边很简单，可靠退出才是核心</h2>
+    <div className="loop-line"><span>generate</span><b>→</b><span>evaluate</span><b>→ accepted / attempts ≥ 3 ?</b><span>END</span><em>NO ↺ generate</em></div>
+    <CodeBlock name="loop" language={language} setLanguage={setLanguage} label="Evaluator–optimizer 有界循环" />
+    <div className="warning-callout"><strong>官方语义与工程替代</strong><span><code>recursionLimit</code> 是失控保险丝，不是业务出口。数组遍历、固定重试、分页读取通常留在普通函数或重试库里；只有每轮需要 checkpoint、动态路由、流式可见或人工介入时，才把循环画进图。</span></div>
+  </>;
 }
 
 function Quickstart({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
@@ -357,10 +668,19 @@ function Quickstart({ language, setLanguage }: { language: Language; setLanguage
         <div><span className="step-no">02</span><h3>定义状态</h3><p>先写数据契约，再写节点。把变化频率不同的数据拆成独立字段。</p></div>
         <div><span className="step-no">03</span><h3>编译并调用</h3><p><code>compile()</code> 会检查图结构，并注入 checkpointer 等运行能力。</p></div>
       </div>
-      <CodeBlock name="hello" language={language} setLanguage={setLanguage} label="最小可运行 StateGraph" />
+      <BlueprintGraph active={2} />
+      <CodeBlock name="weather" language={language} setLanguage={setLanguage} label="贯穿案例：Open-Meteo 天气 → 出行路线" />
+      <div className="state-timeline">
+        <div><span>START</span><code>{`{ origin, destination, latitude, longitude }`}</code></div>
+        <div><span>check_weather</span><code>{`+ temperature, weatherCode`}</code></div>
+        <div><span>plan_route</span><code>{`+ routePlan`}</code></div>
+        <div><span>END</span><code>final State → response</code></div>
+      </div>
       <div className="source-row">
         <a href="https://docs.langchain.com/oss/python/langgraph/overview" target="_blank" rel="noreferrer">Python 官方入门 ↗</a>
         <a href="https://docs.langchain.com/oss/javascript/langgraph/overview" target="_blank" rel="noreferrer">TypeScript 官方入门 ↗</a>
+        <a href="https://github.com/langchain-ai/langgraph-101-ts/blob/main/workshops/101/agents/00-lg101_agent.ts" target="_blank" rel="noreferrer">官方 TS 天气 Agent ↗</a>
+        <a href="https://github.com/langchain-ai/langgraph-101/blob/main/agents/101/agent.py" target="_blank" rel="noreferrer">官方 Python 天气 Agent ↗</a>
       </div>
     </>
   );
@@ -378,12 +698,17 @@ function Concepts({ language, setLanguage }: { language: Language; setLanguage: 
     <>
       <section className="intro-grid">
         <div className="prose">
-          <h2>Graph 是怎么形成的？</h2>
-          <p>先定义 State schema，再把普通同步/异步函数注册为节点，最后用固定边或条件边表达流向。编译后得到一个可 <code>invoke</code>、<code>stream</code>、检查点恢复的 Runnable。</p>
-          <p>底层以消息传递和离散 <em>super-step</em> 推进：同一轮被激活的节点可并行运行；当没有活跃节点且没有消息在途时，图停止。</p>
+          <h2>先给出严格定义，再讨论写法</h2>
+          <p><strong>State</strong> 在数据上是 schema 约束的 key-value 集合；在业务上是一次执行可恢复的最小事实集。边界：不放 socket、模型客户端、数据库连接或无法可靠序列化的资源。</p>
+          <p><strong>Node</strong> 在数据上是 <code>State → Partial&lt;State&gt;</code> 的同步/异步函数；在业务上是一个可命名、可测试、可重试的工作单元。边界：不要同时承担接入层、路由、展示层的全部职责。</p>
         </div>
         <BlueprintGraph active={1} />
       </section>
+      <div className="definition-grid">
+        <div><strong>Edge</strong><span>数据定义：不保存数据，只引用源/目标节点。</span><span>业务定义：表达控制流；固定边是顺序，条件边是选择和循环出口。</span></div>
+        <div><strong>Reducer</strong><span>数据定义：(old, update) → merged。</span><span>业务定义：多个节点并行写同一个 key 时的冲突策略。</span></div>
+        <div><strong>Checkpoint</strong><span>数据定义：values + next + metadata 的状态快照。</span><span>业务定义：恢复、审计、时间旅行；不是跨线程长期知识库。</span></div>
+      </div>
       <h2 className="section-title">节点类型：同一种函数签名，不同的系统职责</h2>
       <div className="type-table">
         {nodeTypes.map((row) => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><small>{row[2]}</small></div>)}
@@ -433,6 +758,11 @@ function DataFlow({ language, setLanguage }: { language: Language; setLanguage: 
 function ApiAtlas({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
   return (
     <>
+      <div className="api-scenarios">
+        <article><span>REST 请求</span><h3>我要最终结果</h3><code>await graph.invoke(input, config)</code><p>路由等待图走到 END，再返回 JSON。</p></article>
+        <article><span>聊天 / 进度 UI</span><h3>我要逐步事件</h3><code>for await (event of graph.stream(...))</code><p><code>updates</code> 看 State diff；<code>messages</code> 看模型流。</p></article>
+        <article><span>人工审批</span><h3>我要暂停后恢复</h3><code>interrupt + thread_id + Command(resume)</code><p>编译时必须配置 checkpointer。</p></article>
+      </div>
       <div className="table-wrap">
         <table className="api-table"><thead><tr><th>API</th><th>它负责什么</th><th>何时使用</th><th>最容易混淆</th></tr></thead>
           <tbody>{API_ROWS.map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={cell}>{index === 0 ? <code>{cell}</code> : cell}</td>)}</tr>)}</tbody>
@@ -451,8 +781,76 @@ function ApiAtlas({ language, setLanguage }: { language: Language; setLanguage: 
   );
 }
 
+function ToyAgent({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
+  const checks = [
+    ["输入", "消息 schema、大小、注入边界"],
+    ["模型输出", "只接受声明过的 tool_calls"],
+    ["工具执行前", "参数、权限、额度、幂等 key"],
+    ["工具执行后", "状态码、结果 schema、可重试错误"],
+    ["循环", "完成条件、最大步骤、超时"],
+    ["恢复", "thread_id、checkpoint、副作用记录"],
+  ];
+  return <>
+    <div className="fact-boundary">
+      <strong>事实边界：按键事件不等于 Agent turn</strong>
+      <p>Claude Code 的公开资料说明它有交互式 REPL、<code>UserPromptSubmit</code>、工具前后与停止等生命周期事件，但没有公开说明“每输入一个普通字符就调用 LLM 预测整句话”。因此这里把两种机制分开：输入中的补全属于终端/UI 层；按下回车提交 prompt，才进入可观察的 Agent loop。</p>
+    </div>
+    <div className="keystroke-grid">
+      <article><span>KEYSTROKE 1</span><h3>输入第一个字符</h3><p>本地输入缓冲区更新；若是 <code>/</code>、<code>@</code> 等特殊前缀，UI 可查询命令、文件或 MCP resource 的本地索引并显示候选。</p><code>buffer = "@"</code></article>
+      <article><span>KEYSTROKE 2…N</span><h3>继续输入</h3><p>候选列表根据新 buffer 重新过滤，旧候选被推翻。这可以完全由确定性 fuzzy search 完成，不必触发 LLM 或图节点。</p><code>candidates = filter(index, buffer)</code></article>
+      <article><span>ENTER</span><h3>提交整行</h3><p>输入冻结为一条 UserMessage；触发提交生命周期、装配上下文并发起模型 turn。这里才进入模型—工具—观察循环。</p><code>agent.invoke({`{ messages: [prompt] }`})</code></article>
+    </div>
+    <section className="intro-grid">
+      <div className="prose">
+        <h2>可变顺序来自“观察后再决定”</h2>
+        <p>模型节点不直接执行天气或路线 API。它只产生结构化 <code>tool_calls</code>。条件边检查最后一条消息：有调用就进入 ToolNode，没有就 END。</p>
+        <p>ToolNode 校验并执行工具，把 ToolMessage 写回 State，再回到模型。于是运行顺序由当前 State、模型提议和确定性验证共同形成。</p>
+      </div>
+      <div className="agent-loop">
+        <div>START</div><div>MODEL<small>提议工具或回答</small></div><div>TOOLS<small>验证并执行</small></div><div>END</div>
+        <span>有 tool_calls：MODEL → TOOLS → MODEL ↺</span><b>无 tool_calls：MODEL → END</b>
+      </div>
+    </section>
+    <CodeBlock name="toyAgent" language={language} setLanguage={setLanguage} label="Toy Agent：天气 / 路线工具循环" />
+    <h2 className="section-title">按下回车后：Claude Code 类编程 Agent 的通用循环</h2>
+    <div className="runtime-strip">{["理解目标", "选择工具", "读取/修改", "运行验证", "观察结果", "继续或结束"].map((item, index) => <div key={item}><span>{index + 1}</span><strong>{item}</strong></div>)}</div>
+    <div className="agent-sequence">
+      <div><span>01</span><strong>Prompt submit</strong><p>整行文本成为 UserMessage；提交 hook 可以补充或拒绝输入。</p></div>
+      <div><span>02</span><strong>Context assembly</strong><p>组合会话历史、项目指令、当前目录、允许的工具与必要文件。</p></div>
+      <div><span>03</span><strong>Model turn</strong><p>LLM 返回文本或结构化 tool_use。我们只依赖结果，不需要展开模型内部推理。</p></div>
+      <div><span>04</span><strong>Route + permission</strong><p>没有 tool call 就流式返回；有工具则匹配权限、参数 schema 与 PreToolUse 策略。</p></div>
+      <div><span>05</span><strong>Execute + observe</strong><p>执行 Read/Edit/Bash/MCP，把 tool_result 和错误写回消息历史。</p></div>
+      <div><span>06</span><strong>Verify + loop</strong><p>测试/类型检查/目标判定未通过则再次调用模型；完成或达到上限则停止。</p></div>
+      <div><span>07</span><strong>Return</strong><p>文本与进度事件流向终端；本轮 transcript 与 session 状态可供恢复。</p></div>
+      <div><span>08</span><strong>Memory</strong><p>会话上下文、checkpoint 与项目级持久指令分层保存，生命周期不同。</p></div>
+    </div>
+    <p>这是一类工具 Agent 的可实现参考架构，不声称复刻 Claude Code 的未公开内部代码。官方可观察接口提供了 <code>stream-json</code>、<code>--max-turns</code>、权限配置、会话 resume，以及提交/工具/停止 hooks，正好对应输入、循环保险丝、验证与恢复这些系统边界。</p>
+    <h2 className="section-title">每轮验证什么</h2>
+    <div className="validation-grid">{checks.map((item) => <div key={item[0]}><strong>{item[0]}</strong><span>{item[1]}</span></div>)}</div>
+    <h2 className="section-title">服务端参考架构：本地控制面 + 模型服务</h2>
+    <div className="server-architecture">
+      <div><strong>Terminal UI</strong><span>key buffer、补全、渲染、取消</span></div><b>→</b>
+      <div><strong>Session runtime</strong><span>上下文、权限、tool registry、Agent loop</span></div><b>→</b>
+      <div><strong>Model API / Gateway</strong><span>认证、预算、路由、审计、流式响应</span></div><b>→</b>
+      <div><strong>Tool execution</strong><span>文件系统、shell、MCP、测试与业务 API</span></div>
+    </div>
+    <div className="memory-model">
+      <div><strong>Working context</strong><span>当前模型请求看到的消息与工具结果；受上下文窗口约束。</span></div>
+      <div><strong>Session transcript</strong><span>支持 continue/resume 的会话记录；类似 LangGraph thread + checkpoint。</span></div>
+      <div><strong>Project memory</strong><span>CLAUDE.md 一类持久项目指令；类似跨运行加载的配置/长期记忆，不等同 checkpoint。</span></div>
+    </div>
+    <div className="warning-callout"><strong>停止不是模型的一句话</strong><span>业务成功、最大步数、工具超时、预算和用户取消都可以终止循环。生产系统同时需要业务退出条件与 recursionLimit 保险丝。</span></div>
+    <div className="source-row">
+      <a href="https://docs.anthropic.com/en/docs/claude-code/cli-usage" target="_blank" rel="noreferrer">Claude Code CLI：stream-json / max-turns / resume ↗</a>
+      <a href="https://docs.anthropic.com/zh-CN/docs/claude-code/memory" target="_blank" rel="noreferrer">Claude Code memory / CLAUDE.md ↗</a>
+      <a href="https://docs.claude.com/it/api/agent-sdk/python" target="_blank" rel="noreferrer">Agent SDK hooks 与 session ↗</a>
+      <a href="https://docs.anthropic.com/en/docs/claude-code/security" target="_blank" rel="noreferrer">Claude Code 权限与安全 ↗</a>
+    </div>
+  </>;
+}
+
 function Playground({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
-  const defaults = snippets.hello;
+  const defaults = snippets.weather;
   const [codes, setCodes] = useState<Record<Language, string>>(defaults);
   const [activeStep, setActiveStep] = useState(-1);
   const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
@@ -482,11 +880,11 @@ function Playground({ language, setLanguage }: { language: Language; setLanguage
   useEffect(() => () => timers.current.forEach(window.clearTimeout), []);
 
   const traces = [
-    ["__start__", "接收输入 { topic: 'LangGraph' }"],
-    ["analyze", "读取 topic，创建节点计划"],
-    ["tool", "写入 result: 'official docs found'"],
-    ["answer", "追加 AIMessage，生成最终回答"],
-    ["__end__", "状态已提交，运行完成"],
+    ["__start__", "接收起点、终点和经纬度"],
+    ["check_weather", "调用 Open-Meteo，写入 29.4°C / code 61"],
+    ["route", "读取天气，确定地铁优先"],
+    ["answer", "写入面向用户的路线说明"],
+    ["__end__", "final State 交给路由层序列化"],
   ];
 
   return (
@@ -504,7 +902,7 @@ function Playground({ language, setLanguage }: { language: Language; setLanguage
           <div className="trace-list">
             {traces.map((trace, index) => <div className={`${index < activeStep ? "done" : ""} ${index === activeStep ? "active" : ""}`} key={trace[0]}><span>{String(index + 1).padStart(2, "0")}</span><strong>{trace[0]}</strong><small>{trace[1]}</small></div>)}
           </div>
-          <div className="state-diff"><span>STATE DIFF</span><pre>{activeStep < 0 ? "等待运行…" : activeStep < 2 ? '+ topic: "LangGraph"' : activeStep < 4 ? '+ result: "official docs found"' : '+ answer: "Graph complete"'}</pre></div>
+          <div className="state-diff"><span>STATE DIFF</span><pre>{activeStep < 0 ? "等待运行…" : activeStep < 2 ? '+ temperature: 29.4\n+ weatherCode: 61' : activeStep < 4 ? '+ routePlan: "地铁优先"' : 'final State → HTTP JSON'}</pre></div>
         </div>
       </div>
     </>
@@ -519,18 +917,28 @@ function Patterns({ language, setLanguage }: { language: Language; setLanguage: 
       </div>
       <div className="decision-callout"><strong>架构选择总则</strong><span>固定流程优先普通节点与边；动态并行用 Send；需要更新并跳转用 Command；高风险动作前 interrupt；长任务必须 checkpoint + 幂等副作用。</span></div>
       <CodeBlock name="pattern" language={language} setLanguage={setLanguage} label="Orchestrator–worker 骨架" />
+      <div className="system-layers">
+        <div><strong>Transport</strong><span>鉴权、限流、JSON、SSE / WebSocket</span></div>
+        <div><strong>Application</strong><span>选择 graph、thread、超时、错误映射</span></div>
+        <div><strong>Graph</strong><span>State、Node、Edge、loop、interrupt</span></div>
+        <div><strong>Infrastructure</strong><span>模型、工具、checkpoint、store、观测</span></div>
+      </div>
     </>
   );
 }
 
 function Project() {
   const exercises = [
-    ["01", "Hello Graph", "状态、节点、边与 compile"],
-    ["02", "Routing", "条件边、循环与递归上限"],
-    ["03", "Parallel Research", "Send、Reducer 与并行 worker"],
-    ["04", "Durable Agent", "Checkpoint、thread 与恢复"],
-    ["05", "Human Review", "interrupt、Command 与审批"],
-    ["06", "Production Blueprint", "流式输出、幂等性、可观测性"],
+    ["01", "Request lifecycle", "HTTP → schema → invoke → JSON"],
+    ["02", "Weather sequence", "真实天气 API 与逐步 State diff"],
+    ["03", "Deterministic routing", "Yes/No、嵌套与 fallback"],
+    ["04", "LLM router", "structured output 与硬规则复核"],
+    ["05", "Bounded loop", "业务出口、attempts、recursionLimit"],
+    ["06", "Tool Agent", "tool_calls → ToolNode → model"],
+    ["07", "Streaming", "updates 适配 SSE / WebSocket"],
+    ["08", "Durable thread", "checkpoint、恢复与幂等"],
+    ["09", "Parallel workers", "Send、Reducer 与汇总"],
+    ["10", "Production review", "安全、监控与架构取舍"],
   ];
   return (
     <>
@@ -554,10 +962,13 @@ function Project() {
 function LessonContent({ active, language, setLanguage }: { active: SectionKey; language: Language; setLanguage: (l: Language) => void }) {
   switch (active) {
     case "roadmap": return <Roadmap />;
+    case "requestflow": return <RequestFlow language={language} setLanguage={setLanguage} />;
+    case "controlflow": return <ControlFlow language={language} setLanguage={setLanguage} />;
     case "quickstart": return <Quickstart language={language} setLanguage={setLanguage} />;
     case "concepts": return <Concepts language={language} setLanguage={setLanguage} />;
     case "dataflow": return <DataFlow language={language} setLanguage={setLanguage} />;
     case "api": return <ApiAtlas language={language} setLanguage={setLanguage} />;
+    case "toyagent": return <ToyAgent language={language} setLanguage={setLanguage} />;
     case "playground": return <Playground language={language} setLanguage={setLanguage} />;
     case "patterns": return <Patterns language={language} setLanguage={setLanguage} />;
     case "project": return <Project />;
@@ -626,16 +1037,19 @@ export default function Home() {
           <div className="context-title">本节要点</div>
           <ul>
             {active === "roadmap" && <><li>低层 Agent 编排</li><li>State + Node + Edge</li><li>什么时候不该用图</li></>}
+            {active === "requestflow" && <><li>接入层先解析</li><li>invoke 才启动图</li><li>HTTP / SSE / WebSocket</li></>}
+            {active === "controlflow" && <><li>顺序 / 条件 / 循环</li><li>LLM 结构化路由</li><li>业务出口 + 保险丝</li></>}
             {active === "quickstart" && <><li>安装依赖</li><li>定义状态与节点</li><li>compile + invoke</li></>}
             {active === "concepts" && <><li>super-step</li><li>节点职责类型</li><li>Reducer 与并发</li></>}
             {active === "dataflow" && <><li>局部状态更新</li><li>JSON 边界</li><li>Checkpoint 恢复</li></>}
             {active === "api" && <><li>Command / Send</li><li>Store / Checkpointer</li><li>Interrupt / Stream</li></>}
+            {active === "toyagent" && <><li>tool_calls 路由</li><li>工具结果回灌</li><li>逐轮验证与退出</li></>}
             {active === "playground" && <><li>编辑双语言代码</li><li>逐节点执行</li><li>观察 State diff</li></>}
             {active === "patterns" && <><li>从确定性到 Agent</li><li>并行与循环</li><li>生产反模式</li></>}
             {active === "project" && <><li>6 个渐进练习</li><li>双语言对照</li><li>生产架构清单</li></>}
           </ul>
           <div className="context-title">学习原则</div>
-          <blockquote>先预测状态变化，再运行；先画控制流，再选 API。</blockquote>
+          <blockquote>先看全貌，再追一次请求；先定义边界，再比较相邻概念。</blockquote>
           <button className="continue" type="button" onClick={() => {
             const index = SECTIONS.findIndex((item) => item.key === active);
             if (index < SECTIONS.length - 1) chooseSection(SECTIONS[index + 1].key);
