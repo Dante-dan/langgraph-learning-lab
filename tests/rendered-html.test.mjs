@@ -38,6 +38,9 @@ test("server-renders the scenario-led weather-agent opening", async () => {
   assert.match(html, /LangGraph 是运行时；你编译出的 Graph 是可执行应用组件/);
   assert.match(html, /官方最小核心是 3 个；工程上用 8 个构件/);
   assert.match(html, /有向图，但不要求是 DAG/);
+  assert.match(html, /href="#\/lesson\/requestflow"/);
+  assert.match(html, /href="#\/playground\/weather"/);
+  assert.match(html, /打开章节 →/);
 
   const scenario = html.indexOf("让我们先看懂一件事");
   const request = html.indexOf("POST /api/trips/plan");
@@ -58,11 +61,18 @@ test("keeps the core technical boundaries explicit in source and styles", async 
   assert.match(page, /ONE → MANY/);
   assert.match(page, /业务终止条件负责正常退出/);
   assert.match(page, /Graph API：State \/ Nodes \/ Edges \/ super-steps/);
+  assert.match(page, /window\.addEventListener\("hashchange", syncRoute\)/);
+  assert.match(page, /new Worker\("\/py-runner\.mjs", \{ type: "module" \}\)/);
+  assert.match(page, /Compile & Run/);
+  assert.doesNotMatch(page, /播放预设执行轨迹/);
 
   assert.match(css, /\.opening-prologue/);
   assert.match(css, /\.journey-list/);
   assert.match(css, /\.validation-loop/);
   assert.match(css, /\.ownership-grid/);
   assert.match(css, /\.topology-grid/);
+  assert.match(css, /\.trip-form/);
+  assert.match(css, /\.runtime-inspector/);
+  assert.match(css, /\.lesson-pagination/);
   assert.match(css, /@media \(max-width: 620px\)/);
 });
