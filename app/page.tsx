@@ -637,6 +637,19 @@ type TopologySegment = {
   arrow?: "right" | "left" | "up" | "down";
 };
 
+const WEATHER_TOPOLOGY_WIDTH = 1180;
+const WEATHER_TOPOLOGY_HEIGHT = 600;
+const MIN_TOPOLOGY_ZOOM = 0.2;
+const MAX_TOPOLOGY_ZOOM = 1.5;
+
+function clampTopologyZoom(value: number) {
+  return Math.min(MAX_TOPOLOGY_ZOOM, Math.max(MIN_TOPOLOGY_ZOOM, value));
+}
+
+function fitTopologyZoom(viewportWidth: number) {
+  return clampTopologyZoom((viewportWidth - 2) / WEATHER_TOPOLOGY_WIDTH);
+}
+
 const WEATHER_TOPOLOGY_POINTS: Array<{
   id: WeatherTopologyPointId;
   label: string;
@@ -719,6 +732,8 @@ function WeatherTopology({
   setValidation: (outcome: ValidationOutcome) => void;
 }) {
   const [inspectedPoint, setInspectedPoint] = useState<WeatherTopologyPointId>("route_weather");
+  const [topologyZoom, setTopologyZoom] = useState(0.75);
+  const [fitMode, setFitMode] = useState(true);
   const topologyScrollRef = useRef<HTMLDivElement>(null);
   const activePoints = new Set<WeatherTopologyPointId>(["start", "validate_input"]);
   const activeEdges = new Set<string>(["start-validate"]);
@@ -748,12 +763,43 @@ function WeatherTopology({
     setValidation(next);
     setInspectedPoint(next === "fallback" ? "fallback" : "quality_gate");
   };
+  const setManualZoom = (next: number) => {
+    setFitMode(false);
+    setTopologyZoom(clampTopologyZoom(next));
+  };
+  const fitTopology = () => {
+    const scroller = topologyScrollRef.current;
+    setFitMode(true);
+    if (!scroller) return;
+    setTopologyZoom(fitTopologyZoom(scroller.clientWidth));
+    scroller.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+  };
+  useEffect(() => {
+    const scroller = topologyScrollRef.current;
+    if (!scroller || !fitMode) return;
+    const applyFit = () => {
+      setTopologyZoom(fitTopologyZoom(scroller.clientWidth));
+      scroller.scrollTo({ left: 0, top: 0 });
+    };
+    applyFit();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(applyFit);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [fitMode]);
   useEffect(() => {
     const scroller = topologyScrollRef.current;
     const point = WEATHER_TOPOLOGY_POINTS.find((item) => item.id === inspectedPoint);
-    if (!scroller || !point || scroller.clientWidth >= 1180) return;
-    scroller.scrollTo({ left: Math.max(0, point.left - scroller.clientWidth / 2), behavior: "smooth" });
-  }, [inspectedPoint]);
+    if (!scroller || !point) return;
+    const scaledWidth = WEATHER_TOPOLOGY_WIDTH * topologyZoom;
+    const scaledHeight = WEATHER_TOPOLOGY_HEIGHT * topologyZoom;
+    if (scaledWidth <= scroller.clientWidth && scaledHeight <= scroller.clientHeight) return;
+    scroller.scrollTo({
+      left: Math.max(0, point.left * topologyZoom - scroller.clientWidth / 2),
+      top: Math.max(0, point.top * topologyZoom - scroller.clientHeight / 2),
+      behavior: "smooth",
+    });
+  }, [inspectedPoint, topologyZoom]);
   const inspected = WEATHER_TOPOLOGY_DETAILS[inspectedPoint];
   const executionPath = branch === "missing"
     ? "START → validate_input → ask_user → INTERRUPT（thread 暂停，等待 resume）"
@@ -785,8 +831,21 @@ function WeatherTopology({
         </fieldset>
       </div>
 
-      <div className="topology-scroll" ref={topologyScrollRef} tabIndex={0} aria-label="天气 Agent 可横向滚动拓扑图">
-        <div className="weather-topology">
+      <div className="topology-view-toolbar">
+        <div><span>CANVAS VIEW</span><strong>{Math.round(topologyZoom * 100)}%</strong><small>{fitMode ? "FIT WIDTH" : "MANUAL"}</small></div>
+        <div className="topology-zoom-controls" role="group" aria-label="拓扑图缩放控制">
+          <button type="button" onClick={() => setManualZoom(topologyZoom - 0.1)} disabled={topologyZoom <= MIN_TOPOLOGY_ZOOM} aria-label="缩小拓扑图">−</button>
+          <input type="range" min="20" max="150" step="1" value={Math.round(topologyZoom * 100)} onChange={(event) => setManualZoom(event.currentTarget.valueAsNumber / 100)} aria-label="拓扑图缩放比例" />
+          <button type="button" onClick={() => setManualZoom(topologyZoom + 0.1)} disabled={topologyZoom >= MAX_TOPOLOGY_ZOOM} aria-label="放大拓扑图">＋</button>
+          <button type="button" className={fitMode ? "active" : ""} onClick={fitTopology} aria-pressed={fitMode}>适应宽度</button>
+          <button type="button" onClick={() => setManualZoom(1)}>100%</button>
+        </div>
+        <p>缩放只改变画布视图，不改变 Graph 的节点、路径或执行状态。</p>
+      </div>
+
+      <div className="topology-scroll" ref={topologyScrollRef} tabIndex={0} aria-label="天气 Agent 可缩放并滚动的拓扑图">
+        <div className="topology-stage" style={{ width: WEATHER_TOPOLOGY_WIDTH * topologyZoom, height: WEATHER_TOPOLOGY_HEIGHT * topologyZoom }}>
+          <div className="weather-topology" style={{ transform: `scale(${topologyZoom})` }}>
           <div aria-hidden="true" className={`hitl-boundary ${branch === "missing" ? "active" : ""}`}><span>HUMAN-IN-THE-LOOP</span><small>interrupt · checkpoint · resume</small></div>
           <div aria-hidden="true" className={`loop-boundary ${branch !== "missing" && validation !== "pass" ? "active" : ""}`}><span>BOUNDED CONDITIONAL LOOP</span><small>failed &amp;&amp; attempts &lt; 3 → retry</small></div>
           {WEATHER_TOPOLOGY_EDGES.map((edge) => (
@@ -808,6 +867,7 @@ function WeatherTopology({
           <div aria-hidden="true" className={`topology-state state-plan-outdoor ${activePoints.has("plan_outdoor") ? "active" : ""}`}><small>STATE Δ</small><code>route_plan / reason</code></div>
           <div aria-hidden="true" className={`topology-state state-validation ${activePoints.has("validate_plan") ? "active" : ""}`}><small>STATE Δ</small><code>accepted / errors / attempts</code></div>
           <div aria-hidden="true" className={`resume-state ${branch === "missing" ? "active" : ""}`}><small>EXTERNAL INPUT</small><code>Command(resume=answer)</code></div>
+          </div>
         </div>
       </div>
 

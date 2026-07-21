@@ -381,9 +381,21 @@ h1 { margin: 0; font-size: clamp(34px, 3.2vw, 54px); line-height: 1.05; letter-s
 .topology-controls button strong { font-size: 11px; }
 .topology-controls button small { color: var(--muted); font: 8px var(--mono); }
 
-.topology-scroll { margin-top: 12px; overflow-x: auto; overflow-y: hidden; border: 1px solid #27445e; border-radius: var(--radius); background: var(--code); box-shadow: 0 18px 42px rgba(11,27,48,.16); scrollbar-color: var(--lime-deep) var(--navy); }
+.topology-view-toolbar { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px 18px; align-items: center; margin-top: 12px; padding: 12px 14px 10px; border: 1px solid #27445e; border-bottom-color: rgba(125,217,235,.16); border-radius: var(--radius) var(--radius) 0 0; color: white; background: var(--navy); }
+.topology-view-toolbar > div:first-child { display: flex; align-items: baseline; gap: 9px; white-space: nowrap; }
+.topology-view-toolbar > div:first-child span { color: var(--cyan); font: 8px var(--mono); letter-spacing: .1em; }
+.topology-view-toolbar > div:first-child strong { color: var(--lime); font: 15px var(--mono); }
+.topology-view-toolbar > div:first-child small { color: #8ea5b3; font: 8px var(--mono); }
+.topology-view-toolbar > p { grid-column: 1 / -1; margin: 0; color: #9db2be; font: 9px/1.45 var(--mono); }
+.topology-zoom-controls { min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: 7px; }
+.topology-zoom-controls button { min-width: 38px; height: 34px; border: 1px solid #49667a; border-radius: 4px; padding: 0 10px; color: #d8e5eb; background: rgba(255,255,255,.045); cursor: pointer; font: 10px var(--mono); white-space: nowrap; }
+.topology-zoom-controls button:hover, .topology-zoom-controls button.active { border-color: var(--lime); color: var(--navy); background: var(--lime); }
+.topology-zoom-controls button:disabled { opacity: .35; cursor: not-allowed; }
+.topology-zoom-controls input { width: min(210px,30vw); accent-color: var(--lime); cursor: ew-resize; }
+.topology-scroll { max-height: min(72vh,720px); overflow: auto; border: 1px solid #27445e; border-top: 0; border-radius: 0 0 var(--radius) var(--radius); background: var(--code); box-shadow: 0 18px 42px rgba(11,27,48,.16); scrollbar-color: var(--lime-deep) var(--navy); }
 .topology-scroll:focus-visible { outline-color: var(--lime); }
-.weather-topology { width: 1180px; height: 600px; position: relative; color: white; background-color: var(--code); background-image: linear-gradient(rgba(125,217,235,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(125,217,235,.055) 1px,transparent 1px); background-size: 20px 20px; }
+.topology-stage { position: relative; margin: 0 auto; transition: width 160ms ease,height 160ms ease; }
+.weather-topology { width: 1180px; height: 600px; position: relative; transform-origin: left top; color: white; background-color: var(--code); background-image: linear-gradient(rgba(125,217,235,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(125,217,235,.055) 1px,transparent 1px); background-size: 20px 20px; transition: transform 160ms ease; }
 .hitl-boundary { position: absolute; z-index: 1; left: 225px; top: 28px; width: 330px; height: 150px; border: 2px dashed #b796e7; border-radius: 10px; background: rgba(128,83,170,.1); opacity: .34; pointer-events: none; transition: opacity 180ms ease,box-shadow 180ms ease; }
 .hitl-boundary.active { opacity: 1; box-shadow: inset 0 0 30px rgba(183,150,231,.11),0 0 22px rgba(183,150,231,.13); }
 .hitl-boundary > span, .hitl-boundary > small { position: absolute; left: 12px; font-family: var(--mono); }
@@ -819,6 +831,10 @@ h1 { margin: 0; font-size: clamp(34px, 3.2vw, 54px); line-height: 1.05; letter-s
   .selected-path { grid-template-columns: 1fr; gap: 8px; }
   .topology-legend, .topology-controls fieldset, .topology-path, .topology-inspector, .hitl-explanation, .orchestration-cards, .official-definition-grid, .concept-triad, .concept-handoff { grid-template-columns: 1fr; }
   .topology-inspector > p, .official-definition-grid article:last-child, .concept-triad > button:last-child, .concept-handoff strong { grid-column: auto; }
+  .topology-view-toolbar { grid-template-columns: 1fr; margin-right: -16px; margin-left: -16px; border-right: 0; border-left: 0; border-radius: 0; }
+  .topology-view-toolbar > p { grid-column: auto; }
+  .topology-zoom-controls { justify-content: flex-start; flex-wrap: wrap; }
+  .topology-zoom-controls input { flex: 1 1 140px; width: auto; }
   .topology-scroll { margin-right: -16px; margin-left: -16px; border-right: 0; border-left: 0; border-radius: 0; }
   .concept-handoff button { width: 100%; white-space: normal; }
   .lesson-pagination { grid-template-columns: 1fr; }

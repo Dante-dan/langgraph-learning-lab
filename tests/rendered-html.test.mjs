@@ -40,6 +40,8 @@ test("server-renders the scenario-led weather-agent opening", async () => {
   assert.match(html, /Ask User|ask_user/);
   assert.match(html, /菱形只是条件边的可视化标记，不是 Node/);
   assert.match(html, /31\.2304/);
+  assert.match(html, /拓扑图缩放控制/);
+  assert.match(html, /适应宽度/);
   assert.match(html, /无停止条件的环/);
   assert.match(html, /INVALID RUN DESIGN/);
   assert.match(html, /低层编排框架，也是长时、具状态 Agent 的运行时/);
@@ -65,6 +67,8 @@ test("keeps the core technical boundaries explicit in source and styles", async 
   ]);
 
   assert.match(page, /WeatherTopology/);
+  assert.match(page, /fitTopologyZoom/);
+  assert.match(page, /new ResizeObserver\(applyFit\)/);
   assert.match(page, /Command\(resume=answer\)/);
   assert.match(page, /包含 interrupt 的.*节点会从函数开头重新执行/);
   assert.match(page, /State 不是“不可逆对象”/);
@@ -80,6 +84,8 @@ test("keeps the core technical boundaries explicit in source and styles", async 
   assert.match(css, /\.opening-prologue/);
   assert.match(css, /\.journey-list/);
   assert.match(css, /\.weather-topology/);
+  assert.match(css, /\.topology-view-toolbar/);
+  assert.match(css, /\.topology-stage/);
   assert.match(css, /\.hitl-boundary/);
   assert.match(css, /\.loop-boundary/);
   assert.match(css, /\.topology-point\.decision/);
