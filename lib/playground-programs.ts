@@ -26,10 +26,11 @@ export const PLAYGROUND_PROGRAMS = {
     step("validate_input", "missing → ask_user" if missing else "valid → check_weather",
          errors=[f"missing:{field}" for field in missing])
     if missing:
-        step("ask_user", "ask_user → END", status="needs_input")
-        step("__end__", "halt")
+        step("ask_user", "interrupt → caller (paused)", status="needs_input")
         return {"events": events, "finalState": state,
-                "response": {"status": "needs_input", "missing": missing}}
+                "response": {"runtimeStatus": "paused", "status": "needs_input",
+                             "missing": missing,
+                             "resumeWith": "Command(resume=answer)"}}
 
     while state["attempts"] < input["maxAttempts"]:
         attempt = state["attempts"] + 1
@@ -122,9 +123,17 @@ async function runGraph(input: Input) {
     errors: missing.map((field) => "missing:" + field),
   });
   if (missing.length) {
-    step("ask_user", "ask_user → END", { status: "needs_input" });
-    step("__end__", "halt");
-    return { events, finalState: state, response: { status: "needs_input", missing } };
+    step("ask_user", "interrupt → caller (paused)", { status: "needs_input" });
+    return {
+      events,
+      finalState: state,
+      response: {
+        runtimeStatus: "paused",
+        status: "needs_input",
+        missing,
+        resumeWith: "Command(resume=answer)",
+      },
+    };
   }
 
   while ((state.attempts as number) < input.maxAttempts) {

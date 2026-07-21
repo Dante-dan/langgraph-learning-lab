@@ -8,8 +8,9 @@
 2. 阅读 `docs/control-flow.md`，理解顺序、条件、循环和工具 Agent。
 3. 运行 `python/02_weather_route.py` 或 `npm run weather --prefix typescript`。
 4. 阅读 `docs/core-concepts.md`，严格区分 State / Node / Edge / Reducer。
-5. 用 `docs/claude-code-agent-loop.md` 对照完整工具 Agent 的输入、循环、验证与 memory。
-6. 完成 `exercises/README.md`，最后用 `architecture/patterns.md` 做生产评审。
+5. 用 `docs/langgraph-official-model.md` 核对 StateGraph、compile、super-step、HITL 与循环边界。
+6. 用 `docs/claude-code-agent-loop.md` 对照完整工具 Agent 的输入、循环、验证与 memory。
+7. 完成 `exercises/README.md`，最后用 `architecture/patterns.md` 做生产评审。
 
 ## 仓库结构
 

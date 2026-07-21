@@ -109,14 +109,18 @@ export function simulateTrip(input: TripSimulationInput): TripSimulationResult {
   );
 
   if (missing.length) {
-    emit("ask_user", "请求补充信息", "图在这里返回可恢复的追问结果；真实系统可配合 interrupt 与 checkpoint。", "ask_user → END", { status: "needs_input" });
-    emit("__end__", "END", "没有更多节点被激活，应用层把 needs_input 结果返回客户端。", "halt");
+    emit("ask_user", "请求补充信息", "interrupt 暂停当前 thread；checkpointer 保存状态，等待应用用同一个 thread_id 恢复。", "interrupt → caller（paused）", { status: "needs_input" });
     return {
       status: state.status,
       path,
       events,
       finalState: snapshot(state),
-      response: { status: "needs_input", missing },
+      response: {
+        runtimeStatus: "paused",
+        status: "needs_input",
+        missing,
+        resumeWith: "Command(resume=answer)",
+      },
     };
   }
 

@@ -613,38 +613,267 @@ function SectionHeader({ section }: { section: typeof SECTIONS[number] }) {
   );
 }
 
+type WeatherBranch = "missing" | "rain" | "clear";
+type ValidationOutcome = "pass" | "retry" | "fallback";
+type WeatherTopologyPointId =
+  | "start"
+  | "validate_input"
+  | "ask_user"
+  | "check_weather"
+  | "route_weather"
+  | "plan_transit"
+  | "plan_outdoor"
+  | "validate_plan"
+  | "quality_gate"
+  | "fallback"
+  | "respond"
+  | "end";
+
+type TopologySegment = {
+  left: number;
+  top: number;
+  length: number;
+  axis: "horizontal" | "vertical";
+  arrow?: "right" | "left" | "up" | "down";
+};
+
+const WEATHER_TOPOLOGY_POINTS: Array<{
+  id: WeatherTopologyPointId;
+  label: string;
+  role: string;
+  shape: "terminal" | "work" | "decision" | "human" | "fallback";
+  left: number;
+  top: number;
+}> = [
+  { id: "start", label: "START", role: "virtual", shape: "terminal", left: 48, top: 300 },
+  { id: "validate_input", label: "validate_input", role: "Node", shape: "work", left: 155, top: 300 },
+  { id: "ask_user", label: "ask_user", role: "Node · interrupt", shape: "human", left: 315, top: 105 },
+  { id: "check_weather", label: "check_weather", role: "Node · I/O", shape: "work", left: 315, top: 300 },
+  { id: "route_weather", label: "route", role: "Edge marker · not Node", shape: "decision", left: 465, top: 300 },
+  { id: "plan_transit", label: "plan_transit", role: "Node", shape: "work", left: 615, top: 210 },
+  { id: "plan_outdoor", label: "plan_outdoor", role: "Node", shape: "work", left: 615, top: 390 },
+  { id: "validate_plan", label: "validate_plan", role: "Node · evaluator", shape: "work", left: 755, top: 300 },
+  { id: "quality_gate", label: "accepted?", role: "Edge marker · not Node", shape: "decision", left: 875, top: 300 },
+  { id: "fallback", label: "fallback", role: "Node", shape: "fallback", left: 1010, top: 485 },
+  { id: "respond", label: "respond", role: "Node", shape: "work", left: 1010, top: 300 },
+  { id: "end", label: "END", role: "virtual", shape: "terminal", left: 1130, top: 300 },
+];
+
+const WEATHER_TOPOLOGY_DETAILS: Record<WeatherTopologyPointId, {
+  kind: string;
+  reads: string;
+  writes: string;
+  why: string;
+}> = {
+  start: { kind: "虚拟入口", reads: "graph.invoke(input)", writes: "激活 validate_input", why: "START 不执行业务函数，只定义初始输入从哪里进入图。" },
+  validate_input: { kind: "确定性 Node", reads: "origin、destination、latitude、longitude", writes: "normalized input、errors", why: "先把可精确判断的完整性规则留在代码里。" },
+  ask_user: { kind: "Human-in-the-Loop Node", reads: "errors / missing fields", writes: "interrupt payload；恢复后写入用户补充值", why: "interrupt 暂停当前 thread，checkpointer 保存状态；外部用 Command(resume=...) 恢复。" },
+  check_weather: { kind: "I/O Node", reads: "latitude、longitude", writes: "temperature、weather_code、observed_at", why: "天气调用有独立的超时、重试和可观测边界。" },
+  route_weather: { kind: "Conditional Edge 的可视化标记（不是 Node）", reads: "weather_code、distance、preference", writes: "目标节点名", why: "路由函数在上游 Node 完成后被求值，不占一个独立 Node 或 super-step；它只决定下一步。" },
+  plan_transit: { kind: "规划 Node", reads: "weather、preference", writes: "mode、route_plan、reason", why: "雨天或少步行条件下生成公共交通候选方案。" },
+  plan_outdoor: { kind: "规划 Node", reads: "weather、distance、preference", writes: "mode、route_plan、reason", why: "天气良好且距离合适时比较步行和公交。" },
+  validate_plan: { kind: "Evaluator Node", reads: "candidate plan、acceptance contract", writes: "accepted、errors、attempts", why: "业务完成由可检查的验收条件决定，不由生成节点自行宣布。" },
+  quality_gate: { kind: "Conditional Edge 的可视化标记（不是 Node）", reads: "accepted、errors、attempts", writes: "respond / retry / fallback", why: "菱形只是把路由判断画出来：通过就响应；可恢复失败走回边；耗尽上限进入 fallback。" },
+  fallback: { kind: "Fallback Node", reads: "errors、attempts", writes: "保守方案、人工确认提示", why: "外部数据或自动规划持续失败时，给出诚实而可执行的降级结果。" },
+  respond: { kind: "映射 Node", reads: "final internal State", writes: "public response fields", why: "只把允许公开的字段交回应用层序列化。" },
+  end: { kind: "虚拟终点", reads: "无", writes: "无", why: "END 表示该路径之后没有动作；当所有节点 inactive 且没有消息在途时，本次执行终止。" },
+};
+
+const WEATHER_TOPOLOGY_EDGES: Array<{
+  id: string;
+  label?: string;
+  labelLeft?: number;
+  labelTop?: number;
+  dashed?: boolean;
+  pending?: boolean;
+  segments: TopologySegment[];
+}> = [
+  { id: "start-validate", segments: [{ left: 76, top: 300, length: 19, axis: "horizontal", arrow: "right" }] },
+  { id: "validate-check", label: "valid", labelLeft: 246, labelTop: 282, segments: [{ left: 215, top: 300, length: 40, axis: "horizontal", arrow: "right" }] },
+  { id: "validate-ask", label: "missing", labelLeft: 222, labelTop: 176, segments: [{ left: 215, top: 300, length: 20, axis: "horizontal" }, { left: 235, top: 105, length: 195, axis: "vertical" }, { left: 235, top: 105, length: 20, axis: "horizontal", arrow: "right" }] },
+  { id: "ask-interrupt", label: "interrupt payload", labelLeft: 382, labelTop: 69, dashed: true, pending: true, segments: [{ left: 375, top: 90, length: 42, axis: "horizontal", arrow: "right" }] },
+  { id: "resume-ask", label: "Command(resume)", labelLeft: 380, labelTop: 129, dashed: true, pending: true, segments: [{ left: 375, top: 125, length: 42, axis: "horizontal", arrow: "left" }] },
+  { id: "ask-revalidate", label: "node returns update → revalidate", labelLeft: 126, labelTop: 215, pending: true, segments: [{ left: 315, top: 140, length: 90, axis: "vertical" }, { left: 155, top: 230, length: 160, axis: "horizontal" }, { left: 155, top: 230, length: 35, axis: "vertical", arrow: "down" }] },
+  { id: "check-route", segments: [{ left: 375, top: 300, length: 48, axis: "horizontal", arrow: "right" }] },
+  { id: "route-transit", label: "rain / long", labelLeft: 516, labelTop: 205, segments: [{ left: 507, top: 300, length: 30, axis: "horizontal" }, { left: 537, top: 210, length: 90, axis: "vertical" }, { left: 537, top: 210, length: 18, axis: "horizontal", arrow: "right" }] },
+  { id: "route-outdoor", label: "clear / short", labelLeft: 512, labelTop: 400, segments: [{ left: 507, top: 300, length: 30, axis: "horizontal" }, { left: 537, top: 300, length: 90, axis: "vertical" }, { left: 537, top: 390, length: 18, axis: "horizontal", arrow: "right" }] },
+  { id: "transit-validate", segments: [{ left: 675, top: 210, length: 24, axis: "horizontal" }, { left: 699, top: 210, length: 90, axis: "vertical" }, { left: 699, top: 300, length: 16, axis: "horizontal", arrow: "right" }] },
+  { id: "outdoor-validate", segments: [{ left: 675, top: 390, length: 24, axis: "horizontal" }, { left: 699, top: 300, length: 90, axis: "vertical" }, { left: 699, top: 300, length: 16, axis: "horizontal", arrow: "right" }] },
+  { id: "validate-gate", segments: [{ left: 815, top: 300, length: 18, axis: "horizontal", arrow: "right" }] },
+  { id: "gate-respond", label: "accepted", labelLeft: 924, labelTop: 282, segments: [{ left: 917, top: 300, length: 33, axis: "horizontal", arrow: "right" }] },
+  { id: "gate-fallback", label: "attempts ≥ 3", labelLeft: 922, labelTop: 395, segments: [{ left: 917, top: 300, length: 24, axis: "horizontal" }, { left: 941, top: 300, length: 185, axis: "vertical" }, { left: 941, top: 485, length: 9, axis: "horizontal", arrow: "right" }] },
+  { id: "fallback-respond", label: "degraded", labelLeft: 1019, labelTop: 392, segments: [{ left: 1010, top: 335, length: 115, axis: "vertical", arrow: "up" }] },
+  { id: "respond-end", segments: [{ left: 1070, top: 300, length: 31, axis: "horizontal", arrow: "right" }] },
+  { id: "retry-loop", label: "failed && attempts < 3 · LOOP", labelLeft: 555, labelTop: 548, segments: [{ left: 875, top: 342, length: 213, axis: "vertical" }, { left: 315, top: 555, length: 560, axis: "horizontal" }, { left: 315, top: 340, length: 215, axis: "vertical", arrow: "up" }] },
+];
+
+function WeatherTopology({
+  branch,
+  setBranch,
+  validation,
+  setValidation,
+}: {
+  branch: WeatherBranch;
+  setBranch: (branch: WeatherBranch) => void;
+  validation: ValidationOutcome;
+  setValidation: (outcome: ValidationOutcome) => void;
+}) {
+  const [inspectedPoint, setInspectedPoint] = useState<WeatherTopologyPointId>("route_weather");
+  const topologyScrollRef = useRef<HTMLDivElement>(null);
+  const activePoints = new Set<WeatherTopologyPointId>(["start", "validate_input"]);
+  const activeEdges = new Set<string>(["start-validate"]);
+
+  if (branch === "missing") {
+    activePoints.add("ask_user");
+    activeEdges.add("validate-ask");
+  } else {
+    ["check_weather", "route_weather", branch === "rain" ? "plan_transit" : "plan_outdoor", "validate_plan", "quality_gate", "respond", "end"].forEach((id) => activePoints.add(id as WeatherTopologyPointId));
+    ["validate-check", "check-route", branch === "rain" ? "route-transit" : "route-outdoor", branch === "rain" ? "transit-validate" : "outdoor-validate", "validate-gate", "respond-end"].forEach((id) => activeEdges.add(id));
+    if (validation === "fallback") {
+      activePoints.add("fallback");
+      activeEdges.add("retry-loop");
+      activeEdges.add("gate-fallback");
+      activeEdges.add("fallback-respond");
+    } else {
+      activeEdges.add("gate-respond");
+      if (validation === "retry") activeEdges.add("retry-loop");
+    }
+  }
+
+  const chooseBranch = (next: WeatherBranch) => {
+    setBranch(next);
+    setInspectedPoint(next === "missing" ? "ask_user" : next === "rain" ? "plan_transit" : "plan_outdoor");
+  };
+  const chooseValidation = (next: ValidationOutcome) => {
+    setValidation(next);
+    setInspectedPoint(next === "fallback" ? "fallback" : "quality_gate");
+  };
+  useEffect(() => {
+    const scroller = topologyScrollRef.current;
+    const point = WEATHER_TOPOLOGY_POINTS.find((item) => item.id === inspectedPoint);
+    if (!scroller || !point || scroller.clientWidth >= 1180) return;
+    scroller.scrollTo({ left: Math.max(0, point.left - scroller.clientWidth / 2), behavior: "smooth" });
+  }, [inspectedPoint]);
+  const inspected = WEATHER_TOPOLOGY_DETAILS[inspectedPoint];
+  const executionPath = branch === "missing"
+    ? "START → validate_input → ask_user → INTERRUPT（thread 暂停，等待 resume）"
+    : `START → validate_input → check_weather ─[${branch === "rain" ? "rain / long" : "clear / short"}]→ ${branch === "rain" ? "plan_transit" : "plan_outdoor"} → validate_plan ─[${validation === "pass" ? "accepted" : validation === "retry" ? "failed → retry → accepted" : "attempts exhausted"}]→ ${validation === "fallback" ? "fallback → " : ""}respond → END`;
+
+  return (
+    <section className="topology-lab" aria-labelledby="topology-title">
+      <div className="topology-lab-head">
+        <div><span className="section-kicker">PART 02 · 把可变顺序画成一张真实拓扑</span><h2 id="topology-title">条件变化时，节点与路径怎样一起变化？</h2><p>先选择输入条件，再选择验证结果。图不会换成另一张：同一张图里只有本次真正经过的节点和边会点亮；点击任意节点还能检查它读什么、返回什么。</p></div>
+        <div className="topology-legend" aria-label="图例">
+          <span><i className="legend-node" />Node：执行函数</span>
+          <span><i className="legend-state" />State：共享快照 / 局部更新</span>
+          <span><i className="legend-edge" />Edge：调度方向</span>
+          <span><i className="legend-decision" />Conditional Edge：选择目标</span>
+          <p className="edge-marker-note"><strong>菱形只是条件边的可视化标记，不是 Node。</strong>路由函数在上游节点完成后被求值，不单独占一个 super-step。</p>
+        </div>
+      </div>
+
+      <div className="topology-controls">
+        <fieldset><legend>① 输入条件</legend>
+          <button type="button" className={branch === "missing" ? "active" : ""} onClick={() => chooseBranch("missing")} aria-pressed={branch === "missing"}><strong>信息不完整</strong><small>进入 ask_user</small></button>
+          <button type="button" className={branch === "rain" ? "active" : ""} onClick={() => chooseBranch("rain")} aria-pressed={branch === "rain"}><strong>下雨 / 少步行</strong><small>进入 plan_transit</small></button>
+          <button type="button" className={branch === "clear" ? "active" : ""} onClick={() => chooseBranch("clear")} aria-pressed={branch === "clear"}><strong>晴天 / 短距离</strong><small>进入 plan_outdoor</small></button>
+        </fieldset>
+        <fieldset disabled={branch === "missing"}><legend>② 规划后的验证结果</legend>
+          <button type="button" className={validation === "pass" ? "active" : ""} onClick={() => chooseValidation("pass")} aria-pressed={validation === "pass"}><strong>首次通过</strong><small>直接 respond</small></button>
+          <button type="button" className={validation === "retry" ? "active" : ""} onClick={() => chooseValidation("retry")} aria-pressed={validation === "retry"}><strong>失败一次</strong><small>走回边后通过</small></button>
+          <button type="button" className={validation === "fallback" ? "active" : ""} onClick={() => chooseValidation("fallback")} aria-pressed={validation === "fallback"}><strong>耗尽上限</strong><small>进入 fallback</small></button>
+        </fieldset>
+      </div>
+
+      <div className="topology-scroll" ref={topologyScrollRef} tabIndex={0} aria-label="天气 Agent 可横向滚动拓扑图">
+        <div className="weather-topology">
+          <div aria-hidden="true" className={`hitl-boundary ${branch === "missing" ? "active" : ""}`}><span>HUMAN-IN-THE-LOOP</span><small>interrupt · checkpoint · resume</small></div>
+          <div aria-hidden="true" className={`loop-boundary ${branch !== "missing" && validation !== "pass" ? "active" : ""}`}><span>BOUNDED CONDITIONAL LOOP</span><small>failed &amp;&amp; attempts &lt; 3 → retry</small></div>
+          {WEATHER_TOPOLOGY_EDGES.map((edge) => (
+            <div key={edge.id} className={`topology-edge ${activeEdges.has(edge.id) ? "active" : ""} ${edge.dashed ? "dashed" : ""} ${edge.pending && branch === "missing" ? "pending" : ""}`} aria-hidden="true">
+              {edge.segments.map((segment, index) => (
+                <i key={index} className={`edge-segment ${segment.axis} ${segment.arrow ? `arrow-${segment.arrow}` : ""}`} style={segment.axis === "horizontal" ? { left: segment.left, top: segment.top, width: segment.length } : { left: segment.left, top: segment.top, height: segment.length }} />
+              ))}
+              {edge.label && <span className="edge-label" style={{ left: edge.labelLeft, top: edge.labelTop }}>{edge.label}</span>}
+            </div>
+          ))}
+          {WEATHER_TOPOLOGY_POINTS.map((point) => (
+            <button key={point.id} type="button" className={`topology-point ${point.shape} ${activePoints.has(point.id) ? "active" : ""} ${inspectedPoint === point.id ? "selected" : ""}`} style={{ left: point.left, top: point.top }} onClick={() => setInspectedPoint(point.id)} aria-pressed={inspectedPoint === point.id}>
+              <span className="point-content"><small>{point.role}</small><strong>{point.label}</strong></span>
+            </button>
+          ))}
+          <div aria-hidden="true" className={`topology-state state-input ${activePoints.has("validate_input") ? "active" : ""}`}><small>STATE Δ</small><code>normalized input / errors</code></div>
+          <div aria-hidden="true" className={`topology-state state-weather ${activePoints.has("check_weather") ? "active" : ""}`}><small>STATE Δ</small><code>weather_code / observed_at</code></div>
+          <div aria-hidden="true" className={`topology-state state-plan-transit ${activePoints.has("plan_transit") ? "active" : ""}`}><small>STATE Δ</small><code>route_plan / reason</code></div>
+          <div aria-hidden="true" className={`topology-state state-plan-outdoor ${activePoints.has("plan_outdoor") ? "active" : ""}`}><small>STATE Δ</small><code>route_plan / reason</code></div>
+          <div aria-hidden="true" className={`topology-state state-validation ${activePoints.has("validate_plan") ? "active" : ""}`}><small>STATE Δ</small><code>accepted / errors / attempts</code></div>
+          <div aria-hidden="true" className={`resume-state ${branch === "missing" ? "active" : ""}`}><small>EXTERNAL INPUT</small><code>Command(resume=answer)</code></div>
+        </div>
+      </div>
+
+      <div className="topology-path" aria-live="polite"><span>本次高亮路径</span><code>{executionPath}</code></div>
+      <div className="topology-inspector" aria-live="polite">
+        <div><span>SELECTED</span><strong>{inspectedPoint}</strong><small>{inspected.kind}</small></div>
+        <div><span>READS</span><code>{inspected.reads}</code><span>RETURNS / ROUTES</span><code>{inspected.writes}</code></div>
+        <p>{inspected.why}</p>
+      </div>
+      {branch === "missing" && <div className="hitl-explanation"><strong>为什么这里不是 END？</strong><span><code>interrupt()</code> 会通过 checkpointer 保存当前图状态并暂停 thread。页面拿到的是“需要外部输入”的中断结果；用户回答后，应用带着同一个 <code>thread_id</code> 调用 <code>Command(resume=...)</code>。恢复时，包含 interrupt 的 <code>ask_user</code> 节点会从函数开头重新执行，所以 interrupt 之前的副作用必须幂等。</span></div>}
+      <div className="source-row"><a href="https://docs.langchain.com/oss/python/langgraph/graph-api" target="_blank" rel="noreferrer">官方 Graph API：State、Nodes、Edges 与执行模型 ↗</a><a href="https://docs.langchain.com/oss/python/langgraph/interrupts" target="_blank" rel="noreferrer">官方 Interrupts：pause、thread_id 与 resume ↗</a></div>
+    </section>
+  );
+}
+
+function OrchestrationBoundary({ onNavigate }: { onNavigate: (section: SectionKey) => void }) {
+  return (
+    <section className="opening-section orchestration-boundary">
+      <span className="section-kicker">PART 03 · 从完整图反推它能表达什么</span>
+      <h2>能画出来，不等于能可靠结束：拓扑能力和运行约束要分开</h2>
+      <p>LangGraph 官方示例明确覆盖 sequence、branch 和 loop。它使用有向图，但不要求是 DAG；真正需要防止的不是“出现环”，而是环没有业务停止条件。</p>
+      <div className="orchestration-cards">
+        <button type="button" onClick={() => onNavigate("controlflow")}>
+          <span className="support-badge">SUPPORTED</span>
+          <div className="mini-topology mini-sequence" aria-hidden="true"><i className="mini-node a" /><i className="mini-line one" /><i className="mini-node b" /><i className="mini-line two" /><i className="mini-node c" /></div>
+          <h3>顺序 · ONE → ONE</h3><p>固定 Edge 让节点在不同 super-step 依次激活。</p><b>查看顺序结构 →</b>
+        </button>
+        <button type="button" onClick={() => onNavigate("dataflow")}>
+          <span className="support-badge">SUPPORTED</span>
+          <div className="mini-topology mini-fan" aria-hidden="true"><i className="mini-node a" /><i className="mini-line trunk" /><i className="mini-line split" /><i className="mini-line upper" /><i className="mini-line lower" /><i className="mini-node b" /><i className="mini-node c" /><i className="mini-line upper-out" /><i className="mini-line lower-out" /><i className="mini-line merge" /><i className="mini-line tail" /><i className="mini-node d" /></div>
+          <h3>分叉与汇合 · ONE → MANY → ONE</h3><p>多个目标可在下一 super-step 并行；共享 key 需要 reducer，明确 barrier 才汇合。</p><b>查看并行数据合并 →</b>
+        </button>
+        <button type="button" onClick={() => onNavigate("controlflow")}>
+          <span className="support-badge">SUPPORTED</span>
+          <div className="mini-topology mini-loop" aria-hidden="true"><i className="mini-node a" /><i className="mini-line forward" /><i className="mini-node b" /><i className="mini-line exit" /><i className="mini-node c" /><i className="mini-line down" /><i className="mini-line back" /><i className="mini-line up" /></div>
+          <h3>有界循环 · LOOP WITH EXIT</h3><p>条件 Edge 可以回到旧节点；验收通过、次数、超时或人工决定负责退出。</p><b>查看 Loop 代码 →</b>
+        </button>
+        <button type="button" className="invalid" onClick={() => onNavigate("controlflow")}>
+          <span className="support-badge danger">INVALID RUN DESIGN</span>
+          <div className="mini-topology mini-infinite" aria-hidden="true"><i className="mini-node a" /><i className="mini-node b" /><i className="mini-line top" /><i className="mini-line bottom" /><i className="mini-cross">×</i></div>
+          <h3>无停止条件的环</h3><p>它不是“无法定义的拓扑”：可以编译，但运行会在达到 recursion limit 时抛错，不能作为可完成流程交付。</p><b>查看保险丝与业务出口 →</b>
+        </button>
+      </div>
+      <div className="direction-note"><strong>图上的左、右只是排版</strong><p>真正的“方向”是消息沿 Edge 激活下一 super-step。回边会再次执行旧节点，但不会穿越时间改写已经保存的 checkpoint。</p></div>
+      <div className="source-row"><a href="https://docs.langchain.com/oss/python/langgraph/use-graph-api" target="_blank" rel="noreferrer">官方示例：sequence、branch 与 loop ↗</a><a href="https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT" target="_blank" rel="noreferrer">官方错误说明：GRAPH_RECURSION_LIMIT ↗</a></div>
+    </section>
+  );
+}
+
 function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) {
   const journey = [
     ["01", "用户提交", "在天气出行页面输入公司、机场、时间与位置，然后点击“生成计划”。", "这时还没有进入 LangGraph"],
     ["02", "服务端接住 POST", "路由层把 JSON bytes 反序列化成 TripInput，完成鉴权、字段校验并生成 request_id。", "应用层职责"],
-    ["03", "启动图", "应用层调用 graph.ainvoke(input, config)。输入成为初始 State，虚拟 START 激活第一个节点。", "LangGraph 开始调度"],
-    ["04", "查询天气", "check_weather 读取经纬度，调用天气 API，只返回 temperature、weather_code 与 observed_at 的局部更新。", "Node 做工作"],
-    ["05", "选择路线", "条件边读取当前 State：缺少信息就询问用户；下雨进入公共交通方案；天气好进入步行 / 公交比较。", "Edge 决定下一步"],
-    ["06", "生成候选计划", "被选中的规划节点写入 mode、route_plan 与 reason。它不直接结束请求，后面还有质量门。", "State 继续演化"],
-    ["07", "验证并决定是否循环", "validate_plan 检查天气是否过期、路线是否可用、解释是否完整。通过就响应；失败且未超上限就回到查询 / 规划；连续失败则进入 fallback。", "条件边形成有界回路"],
-    ["08", "返回结果", "respond 只挑选允许公开的字段；到达 END 后，路由层把 final State 序列化成 HTTP JSON。", "END 不是业务函数"],
-  ];
-  const concepts = [
-    ["01", "State", "一次运行的共享事实快照；schema 规定节点能读写哪些 channel。"],
-    ["02", "Node", "读取当前 State、执行一个可命名工作、返回局部更新的函数。"],
-    ["03", "Edge", "从当前节点激活哪个下一节点；固定、条件、并行或回边都属于控制流。"],
-    ["04", "START / END", "虚拟执行边界：START 投递初始输入，END 表示这条路径不再激活节点。"],
-    ["05", "Reducer", "定义 old value 与 node update 怎样合并；并行写同一 channel 时尤其关键。"],
-    ["06", "Compiled graph", "builder.compile() 校验结构并生成可 invoke / stream 的可执行 Runnable。"],
-    ["07", "Checkpointer", "按 thread 保存每个 super-step 的快照，让暂停、恢复与重放成为可能。"],
-    ["08", "Runtime context", "向节点注入模型客户端、配置与连接等运行依赖，而不污染可持久化 State。"],
-  ];
-  const nodeRoles = [
-    ["确定性转换节点", "校验、格式转换、计算", "无外部副作用，容易单测"],
-    ["I/O / 工具节点", "天气、地图、数据库、搜索", "负责一个外部能力，显式处理超时与幂等"],
-    ["模型节点", "理解、生成、结构化决策", "只处理语义不确定性，输出要有 schema"],
-    ["验证节点", "检查候选结果是否满足验收条件", "写 accepted / errors，不把“感觉完成”当完成"],
-    ["人工 / 子图节点", "暂停审批或封装另一张图", "生命周期、输入输出和恢复边界必须清楚"],
+    ["03", "启动图", "应用层调用 graph.ainvoke(input, config)。输入成为初始 State，虚拟 START 激活 validate_input。", "LangGraph 开始调度"],
+    ["04", "检查业务输入", "validate_input 读取起点、终点与位置：完整才继续；缺失就路由到 ask_user 并 interrupt。", "第一次条件分支"],
+    ["05", "查询天气", "check_weather 读取经纬度，调用天气 API，只返回 temperature、weather_code 与 observed_at 的局部更新。", "Node 做工作"],
+    ["06", "选择路线", "条件边读取当前 State：下雨进入公共交通方案；天气好进入步行 / 公交比较。", "Edge 决定下一步"],
+    ["07", "生成候选计划", "被选中的规划节点写入 mode、route_plan 与 reason。它不直接结束请求，后面还有质量门。", "State 继续演化"],
+    ["08", "验证并决定是否循环", "validate_plan 检查天气是否过期、路线是否可用、解释是否完整。通过就响应；失败且未超上限就回到查询 / 规划；连续失败则进入 fallback。", "条件边形成有界回路"],
+    ["09", "返回结果", "respond 只挑选允许公开的字段；到达 END 后，路由层把 final State 序列化成 HTTP JSON。", "END 不是业务函数"],
   ];
   const journeySnapshots = [
     { layer: "Browser", input: "form fields", output: "HTTP request intent", state: { origin: "上海公司", destination: "浦东机场", preference: "下雨少步行" } },
     { layer: "Router", input: "JSON bytes", output: "TripInput", state: { requestId: "trip-42", authenticated: true, schemaValid: true } },
-    { layer: "Application", input: "TripInput + RunnableConfig", output: "initial State", state: { threadId: "trip-42", next: ["check_weather"] } },
+    { layer: "Application", input: "TripInput + RunnableConfig", output: "initial State", state: { threadId: "trip-42", next: ["validate_input"] } },
+    { layer: "Graph node", input: "origin / destination / location", output: "Partial<State>", state: { normalized: true, errors: [], next: ["check_weather"] } },
     { layer: "Graph node", input: "latitude / longitude", output: "Partial<State>", state: { temperature: 22.8, weatherCode: 61, observedAt: "07:55" } },
     { layer: "Conditional edge", input: "current State", output: "target node", state: { decision: "plan_transit", reason: "weatherCode >= 51" } },
     { layer: "Planning node", input: "weather + preference", output: "candidate plan", state: { mode: "地铁优先", routePlan: "公司 → 2号线 → 机场" } },
@@ -652,11 +881,11 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
     { layer: "Response mapper", input: "final State", output: "public JSON", state: { status: "accepted", mode: "地铁优先" } },
   ];
   const [selectedJourney, setSelectedJourney] = useState(0);
-  const [branch, setBranch] = useState<"missing" | "rain" | "clear">("rain");
-  const [validation, setValidation] = useState<"pass" | "retry" | "fallback">("pass");
+  const [branch, setBranch] = useState<WeatherBranch>("rain");
+  const [validation, setValidation] = useState<ValidationOutcome>("pass");
   const selectedSnapshot = journeySnapshots[selectedJourney];
   const branchResponse = branch === "missing"
-    ? { status: "needs_input", next: "ask_user", missing: ["location"] }
+    ? { runtimeStatus: "paused", at: "ask_user", missing: ["location"], resumeWith: "Command(resume=answer)" }
     : validation === "fallback"
       ? { status: "fallback", attempts: 3, mode: "人工确认", reason: "候选路线连续未通过验证" }
       : {
@@ -683,6 +912,7 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
           <div><strong>终点</strong><b>浦东机场</b></div>
           <div><strong>偏好</strong><b>下雨少步行</b></div>
           <div><strong>出发时间</strong><b>明早 08:00</b></div>
+          <div><strong>当前位置</strong><b>31.2304, 121.4737</b></div>
         </div>
         <div className="scenario-goal">
           <span>完成标准 · ACCEPTANCE CONTRACT</span>
@@ -702,7 +932,9 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
   "origin": "上海公司",
   "destination": "浦东机场",
   "departureAt": "2026-07-21T08:00:00+08:00",
-  "preference": "下雨少步行"
+  "preference": "下雨少步行",
+  "latitude": 31.2304,
+  "longitude": 121.4737
 }`}</pre>
       </div>
 
@@ -727,89 +959,46 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
         </div>
       </section>
 
-      <section className="branch-story" aria-label="天气出行 Agent 的分支与验证循环">
-        <div className="branch-story-head">
-          <span className="section-kicker">同一条请求的三个可能分支</span>
-          <h2>执行顺序不是预先写死的一条线</h2>
-          <p>天气节点结束后，条件边读取刚刚更新的 State，再选择一个或多个目标。规划完成后，验证节点还可能把执行送回前面的节点。</p>
-        </div>
-        <div className="branch-lanes">
-          <button type="button" className={branch === "missing" ? "active" : ""} onClick={() => setBranch("missing")} aria-pressed={branch === "missing"}><span>IF 信息不完整</span><strong>ask_user</strong><p>暂停并向用户追问位置或时间，恢复后重新路由。</p><b>选择此分支 →</b></button>
-          <button type="button" className={branch === "rain" ? "active" : ""} onClick={() => setBranch("rain")} aria-pressed={branch === "rain"}><span>IF weather_code ≥ 51</span><strong>plan_transit</strong><p>减少暴露在雨中的步行距离，优先地铁或网约车接驳。</p><b>选择此分支 →</b></button>
-          <button type="button" className={branch === "clear" ? "active" : ""} onClick={() => setBranch("clear")} aria-pressed={branch === "clear"}><span>ELSE 天气良好</span><strong>plan_outdoor</strong><p>比较步行与公交，用时间、成本和偏好做确定性选择。</p><b>选择此分支 →</b></button>
-        </div>
-        <div className="validation-picker">
-          <span>再选择验证结果</span>
-          <button type="button" className={validation === "pass" ? "active" : ""} onClick={() => setValidation("pass")}>首次通过</button>
-          <button type="button" className={validation === "retry" ? "active" : ""} onClick={() => setValidation("retry")}>失败一次后通过</button>
-          <button type="button" className={validation === "fallback" ? "active" : ""} onClick={() => setValidation("fallback")}>超过上限 → fallback</button>
-        </div>
-        <div className="selected-path"><span>本次路径</span><code>{branch === "missing" ? "START → validate_input → ask_user → END" : `START → check_weather → ${branch === "rain" ? "plan_transit" : "plan_outdoor"} → validate_plan${validation === "retry" ? " ↺ check_weather → validate_plan" : ""}${validation === "fallback" ? " ↺ … → fallback" : ""} → respond → END`}</code></div>
-      </section>
+      <WeatherTopology branch={branch} setBranch={setBranch} validation={validation} setValidation={setValidation} />
 
       <section className="result-reveal">
         <div>
-          <span className="section-kicker">这次请求的最终结果</span>
-          <h2>先看到产品输出，再去看 Graph</h2>
-          <p>上面的分支和验证选项会真实改变这里的路径与输出。继续进入 Playground，还可以修改输入和双语言代码并实际执行。</p>
+          <span className="section-kicker">图的路径与外部可见结果同步变化</span>
+          <h2>{branch === "missing" ? "这次运行暂停了，还没有到 END" : "高亮路径最终收敛为一个可返回结果"}</h2>
+          <p>{branch === "missing" ? "应用层把 interrupt 信息呈现给用户；收到回答后，用同一个 thread_id 恢复，而不是重新伪造一次无关请求。" : "切换验证结果会让回边或 fallback 同步点亮。继续进入 Playground，还可以修改输入和双语言代码并实际执行。"}</p>
         </div>
         <pre>{JSON.stringify(branchResponse, null, 2)}</pre>
       </section>
 
-      <section className="opening-section">
-        <span className="section-kicker">PART 02 · 框架、Graph 与业务应用的关系</span>
-        <h2>更准确的说法：LangGraph 是运行时；你编译出的 Graph 是可执行应用组件</h2>
-        <p><code>langgraph</code> 这个软件包本身仍是低层编排框架 / 运行时。你用它声明 State、Node 和 Edge，再 <code>compile()</code> 得到的 graph，则像一段可执行程序：可以接收输入、调度步骤、暂停、恢复、流式输出。它不是 HTTP 服务、页面或天气 API；这些仍属于完整业务应用。</p>
+      <OrchestrationBoundary onNavigate={onNavigate} />
+
+      <section className="opening-section official-position">
+        <span className="section-kicker">PART 04 · 到这里再问：LangGraph 在系统里究竟是什么？</span>
+        <h2>以官方定义为准：它是低层编排框架，也是长时、具状态 Agent 的运行时</h2>
+        <p>这不是把个人类比包装成定义。官方把 LangGraph 描述为用于构建、管理与部署长时、具状态 Agent 的 <strong>low-level orchestration framework and runtime</strong>，并强调它专注于 agent orchestration。</p>
+        <div className="official-definition-grid">
+          <article><span>01 · StateGraph</span><h3>图定义的 Builder</h3><p>先声明 State schema，再添加 Nodes 与 Edges。它描述控制流，还不是 HTTP 服务。</p></article>
+          <article><span>02 · compile()</span><h3>结构检查 + 运行能力装配</h3><p>官方说明 compile 会做基本结构检查，并在这里配置 checkpointer、interrupt 等运行参数。</p></article>
+          <article><span>03 · Compiled graph</span><h3>可 invoke / stream 的编排对象</h3><p>编译后才能使用。更准确的叫法是可执行的 compiled graph / Runnable，而不是“整个应用程序”。</p></article>
+        </div>
         <div className="ownership-grid">
-          <article><span>你的业务应用负责</span><h3>“做什么才算对”</h3><p>接收请求、鉴权、选择 graph、定义天气规则、节点业务代码、验收标准、fallback、响应字段。</p></article>
-          <article><span>LangGraph 核心负责</span><h3>“下一步怎样被调度”</h3><p>投递初始 State、激活 Node、应用局部更新与 Reducer、沿 Edge 进入下一 super-step、checkpoint、暂停与恢复。</p></article>
-          <article><span>外部基础设施负责</span><h3>“能力从哪里来”</h3><p>天气 / 地图 API、LLM Provider、数据库、队列、追踪与告警。LangGraph 调用它们，但不会替你实现它们。</p></article>
+          <article><span>业务应用</span><h3>接请求，定义“什么算完成”</h3><p>HTTP、鉴权、天气规则、节点业务代码、验收标准、fallback 和响应字段都由你负责。</p></article>
+          <article><span>LangGraph</span><h3>管理状态怎样沿图演化</h3><p>按 Edge 激活 Node、合并局部更新、执行 super-step，并提供 durable execution、streaming、HITL 与 persistence。</p></article>
+          <article><span>外部基础设施</span><h3>提供真实能力</h3><p>天气 / 地图 API、LLM Provider、数据库、队列和观测系统不由 LangGraph 自动实现。</p></article>
         </div>
+        <div className="source-row"><a href="https://docs.langchain.com/oss/python/langgraph/overview" target="_blank" rel="noreferrer">官方 Overview：framework 与 runtime 定位 ↗</a><a href="https://docs.langchain.com/oss/python/langgraph/graph-api" target="_blank" rel="noreferrer">官方 Graph API：compile 与执行模型 ↗</a></div>
       </section>
 
-      <section className="opening-section">
-        <span className="section-kicker">PART 03 · 从刚才的流程衍生核心概念</span>
-        <h2>官方最小核心是 3 个；工程上用 8 个构件建立完整心智模型</h2>
-        <p>官方 Graph API 把 <strong>State、Node、Edge</strong> 称为三个关键组件。为了能解释“怎样启动、怎样合并、怎样执行和怎样恢复”，本课程再补上五个相邻构件。这里的“8 个”是教学模型，不冒充官方唯一计数。</p>
-        <div className="concept-chain">
-          {concepts.map((item) => <button type="button" onClick={() => onNavigate("concepts")} key={item[0]}><span>{item[0]}</span><h3>{item[1]}</h3><p>{item[2]}</p><b>进入概念页 →</b></button>)}
+      <section className="opening-section concept-bridge">
+        <span className="section-kicker">PART 05 · 现在才给刚才看到的东西命名</span>
+        <h2>先只记三个角色：Node 做工作，Edge 决定下一步，State 保存当前共享快照</h2>
+        <p>这三个名称不是孤立词汇，它们分别对应刚才图里的实体。Reducer、checkpointer、runtime context 等相邻概念，等遇到“并行怎样合并”“暂停怎样恢复”时再展开。</p>
+        <div className="concept-triad">
+          <button type="button" onClick={() => onNavigate("concepts")}><i className="concept-node-shape" /><span>NODE</span><h3>可被调度的函数</h3><p>读取当前 State，执行计算或副作用，返回局部更新。</p><b>深入 Node 边界 →</b></button>
+          <button type="button" onClick={() => onNavigate("concepts")}><i className="concept-edge-shape" /><span>EDGE</span><h3>控制流与停止路径</h3><p>固定 Edge 表达顺序；Conditional Edge 根据 State 返回一个或多个目标。</p><b>深入 Edge 类型 →</b></button>
+          <button type="button" onClick={() => onNavigate("dataflow")}><i className="concept-state-shape" /><span>STATE</span><h3>当前应用快照</h3><p>节点提交的是按 key 的更新；默认覆盖，也可以由 reducer 定义合并方式。</p><b>深入 State 与 Reducer →</b></button>
         </div>
-        <div className="state-node-answer">
-          <div>
-            <span className="section-kicker">为什么 State 不藏在 Node 里？</span>
-            <h3>因为它是跨节点、跨步骤、可合并和可恢复的公共契约</h3>
-            <p>如果天气只存在 <code>check_weather</code> 的局部变量里，条件边读不到它，规划节点拿不到它，checkpointer 也无法恢复它，并行节点更无法按 reducer 合并它。节点内部当然可以有临时变量；需要跨边界继续存在的事实才进入 State。</p>
-          </div>
-          <div className="correction-card">
-            <strong>“State 不可逆，所以只能单向流动”只对了一半</strong>
-            <p>已经保存的 checkpoint 快照不会被过去的节点原地改写；但当前 State 的同一个 key 可以被后续 update 覆盖或经 reducer 累积，控制流也可以沿回边再次进入旧节点。真正单向的是执行时间与 update 的提交顺序，不是画面上的“只能从左到右”。</p>
-          </div>
-        </div>
-        <h2 className="section-title">Node 没有官方类继承树；工程上按职责划边界</h2>
-        <div className="node-role-grid">
-          {nodeRoles.map((role) => <button type="button" onClick={() => onNavigate("concepts")} key={role[0]}><h3>{role[0]}</h3><p>{role[1]}</p><small>{role[2]}</small><b>查看边界 →</b></button>)}
-        </div>
-        <div className="decision-callout"><strong>节点边界的判断标准</strong><span>一个节点应该只有一个清楚的重试、观测和失败理由。它通常读取 State / Runtime，返回 <code>Partial&lt;State&gt;</code>；路由函数只决定去哪，不顺手调用天气 API。需要更新状态并跳转时再使用 Command。</span></div>
-      </section>
-
-      <section className="opening-section topology-section">
-        <span className="section-kicker">PART 04 · 图到底是哪一种图？</span>
-        <h2>它是有向图，但不要求是 DAG；允许分叉、汇合和有界循环</h2>
-        <div className="topology-grid">
-          <button type="button" onClick={() => onNavigate("controlflow")}><span>ONE → ONE</span><h3>顺序</h3><p><code>A → B</code>。B 在后一个 super-step 被激活。</p><b>运行顺序示例 →</b></button>
-          <button type="button" onClick={() => onNavigate("controlflow")}><span>ONE → MANY</span><h3>扇出 / 并行</h3><p>A 有多个固定出边，或条件边返回多个目标；目标节点在下一 super-step 并行运行。</p><b>查看分支示例 →</b></button>
-          <button type="button" onClick={() => onNavigate("dataflow")}><span>MANY → ONE</span><h3>汇合</h3><p>B、C 汇入 D。并行写同一 State channel 时必须定义能正确合并的 reducer。</p><b>查看 Reducer →</b></button>
-          <button type="button" onClick={() => onNavigate("controlflow")}><span>A → B → A</span><h3>有环</h3><p>条件边可以回到旧节点。业务终止条件负责正常退出，recursion limit 只是失控保险丝。</p><b>运行 Loop →</b></button>
-        </div>
-        <div className="direction-note">
-          <strong>“方向”指 Edge 与 super-step，不指屏幕方位</strong>
-          <p>图画成左到右只是排版。数据更新随激活消息进入下一 super-step；回边可以让控制流再次执行左侧节点，但不会穿越时间去修改旧 checkpoint。到所有节点 inactive、且没有消息在途时，本次 graph run 才停止。</p>
-        </div>
-        <div className="source-row">
-          <a href="https://docs.langchain.com/oss/python/langgraph/graph-api" target="_blank" rel="noreferrer">官方 Graph API：State / Nodes / Edges / super-steps ↗</a>
-          <a href="https://docs.langchain.com/oss/python/langgraph/use-graph-api" target="_blank" rel="noreferrer">官方示例：sequence / branch / loop ↗</a>
-          <a href="https://docs.langchain.com/oss/python/langgraph/persistence" target="_blank" rel="noreferrer">官方 Persistence：checkpoint 与 replay ↗</a>
-        </div>
+        <div className="concept-handoff"><strong>为什么概念页放在这里之后？</strong><span>因为你已经亲眼看到 State 被谁读取、Node 为什么分开、Edge 为什么需要条件和回边。下一章再讨论严格定义，就不再是背术语。</span><button type="button" onClick={() => onNavigate("concepts")}>进入“图的骨架与边界” →</button></div>
       </section>
 
       <section className="route-map">
@@ -830,19 +1019,21 @@ function RequestFlow({ language, setLanguage }: { language: Language; setLanguag
     ["01", "Client", "点击生成计划，POST /api/trips/plan", "JSON bytes"],
     ["02", "Router", "反序列化、鉴权、schema 校验", "TripInput"],
     ["03", "Application", "选择 graph、thread_id，调用 ainvoke", "RunnableConfig"],
-    ["04", "START", "初始 input 成为 State，激活 check_weather", "checkpoint #0"],
-    ["05", "check_weather", "读取坐标，调用 Open-Meteo，返回局部更新", "+ weather"],
-    ["06", "conditional edge", "按信息完整度、天气与距离选择下一节点", "branch"],
-    ["07", "plan_*", "生成候选路线、理由与 fallback", "+ route_plan"],
-    ["08", "validate_plan", "通过 → respond；失败 → 重试 / fallback", "accepted?"],
-    ["09", "END", "没有待执行节点，形成 final State", "checkpoint #N"],
-    ["10", "Router", "挑选公开字段，序列化响应", "HTTP JSON"],
+    ["04", "START", "初始 input 成为 State，激活 validate_input", "checkpoint #0"],
+    ["05", "validate_input", "读取业务字段；完整则继续，缺失则进入 ask_user", "+ normalized input / errors"],
+    ["06", "check_weather", "读取坐标，调用 Open-Meteo，返回局部更新", "+ weather"],
+    ["07", "conditional edge", "按天气、距离与偏好选择下一节点", "branch"],
+    ["08", "plan_*", "生成候选路线、理由与 fallback", "+ route_plan"],
+    ["09", "validate_plan", "通过 → respond；失败 → 重试 / fallback", "accepted?"],
+    ["10", "END", "没有待执行节点，形成 final State", "checkpoint #N"],
+    ["11", "Router", "挑选公开字段，序列化响应", "HTTP JSON"],
   ];
   const payloads = [
     { owner: "Browser", input: "form state", output: "POST body bytes", data: { origin: "上海公司", destination: "浦东机场", preference: "less_walking" } },
     { owner: "HTTP router", input: "Request", output: "TripInput", data: { authenticated: true, schemaValid: true, requestId: "trip-42" } },
     { owner: "Application service", input: "TripInput", output: "graph.ainvoke(input, config)", data: { threadId: "trip-42", streamMode: "updates" } },
-    { owner: "LangGraph runtime", input: "initial State", output: "active: check_weather", data: { next: ["check_weather"], checkpoint: 0 } },
+    { owner: "LangGraph runtime", input: "initial State", output: "active: validate_input", data: { next: ["validate_input"], checkpoint: 0 } },
+    { owner: "validate_input node", input: "origin / destination / location", output: "Partial<State>", data: { errors: [], normalized: true, next: "check_weather" } },
     { owner: "check_weather node", input: "latitude / longitude", output: "Partial<State>", data: { temperature: 22.8, weatherCode: 61 } },
     { owner: "routing function", input: "current State", output: "node name", data: { target: "plan_transit", reason: "weatherCode >= 51" } },
     { owner: "plan_transit node", input: "weather + preference", output: "Partial<State>", data: { mode: "地铁优先", routePlan: "公司 → 2号线 → 机场" } },
@@ -961,6 +1152,17 @@ function Concepts({ language, setLanguage }: { language: Language; setLanguage: 
         <div><strong>Edge</strong><span>数据定义：不保存数据，只引用源/目标节点。</span><span>业务定义：表达控制流；固定边是顺序，条件边是选择和循环出口。</span></div>
         <div><strong>Reducer</strong><span>数据定义：(old, update) → merged。</span><span>业务定义：多个节点并行写同一个 key 时的冲突策略。</span></div>
         <div><strong>Checkpoint</strong><span>数据定义：values + next + metadata 的状态快照。</span><span>业务定义：恢复、审计、时间旅行；不是跨线程长期知识库。</span></div>
+      </div>
+      <div className="state-node-answer">
+        <div>
+          <span className="section-kicker">为什么 State 不放进某一个 Node 里？</span>
+          <h3>因为跨节点继续存在的事实，需要成为整张图可见的契约</h3>
+          <p>Node 内部可以有局部变量；但天气结果如果只藏在 <code>check_weather</code> 的闭包里，条件边、规划节点和 checkpointer 都读不到它。进入 State 的应该是后续步骤、恢复或审计仍需要的事实。</p>
+        </div>
+        <div className="correction-card">
+          <strong>State 不是“不可逆对象”</strong>
+          <p>后续 Node 可以覆盖某个 key，Reducer 也可以合并多个更新；有环时旧 Node 还会再次运行。不会被原地篡改的是已经保存的历史 checkpoint。把这三件事区分开，才能理解 update、replay 与 loop。</p>
+        </div>
       </div>
       <h2 className="section-title">节点类型：同一种函数签名，不同的系统职责</h2>
       <div className="type-table">

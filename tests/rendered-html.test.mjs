@@ -35,8 +35,15 @@ test("server-renders the scenario-led weather-agent opening", async () => {
   assert.match(html, /POST \/api\/trips\/plan/);
   assert.match(html, /Agent 只有在下面四件事都成立时才算完成/);
   assert.match(html, /验证并决定是否循环/);
-  assert.match(html, /LangGraph 是运行时；你编译出的 Graph 是可执行应用组件/);
-  assert.match(html, /官方最小核心是 3 个；工程上用 8 个构件/);
+  assert.match(html, /条件变化时，节点与路径怎样一起变化/);
+  assert.match(html, /HUMAN-IN-THE-LOOP/);
+  assert.match(html, /Ask User|ask_user/);
+  assert.match(html, /菱形只是条件边的可视化标记，不是 Node/);
+  assert.match(html, /31\.2304/);
+  assert.match(html, /无停止条件的环/);
+  assert.match(html, /INVALID RUN DESIGN/);
+  assert.match(html, /低层编排框架，也是长时、具状态 Agent 的运行时/);
+  assert.match(html, /先只记三个角色/);
   assert.match(html, /有向图，但不要求是 DAG/);
   assert.match(html, /href="#\/lesson\/requestflow"/);
   assert.match(html, /href="#\/playground\/weather"/);
@@ -44,8 +51,10 @@ test("server-renders the scenario-led weather-agent opening", async () => {
 
   const scenario = html.indexOf("让我们先看懂一件事");
   const request = html.indexOf("POST /api/trips/plan");
-  const concepts = html.indexOf("官方最小核心是 3 个");
-  assert.ok(scenario >= 0 && request > scenario && concepts > request);
+  const topology = html.indexOf("条件变化时，节点与路径怎样一起变化");
+  const officialPosition = html.indexOf("低层编排框架，也是长时、具状态 Agent 的运行时");
+  const concepts = html.indexOf("先只记三个角色");
+  assert.ok(scenario >= 0 && request > scenario && topology > request && officialPosition > topology && concepts > officialPosition);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 
@@ -55,12 +64,14 @@ test("keeps the core technical boundaries explicit in source and styles", async 
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /State 不藏在 Node 里/);
-  assert.match(page, /State 不可逆，所以只能单向流动/);
-  assert.match(page, /过去的节点原地改写/);
+  assert.match(page, /WeatherTopology/);
+  assert.match(page, /Command\(resume=answer\)/);
+  assert.match(page, /包含 interrupt 的.*节点会从函数开头重新执行/);
+  assert.match(page, /State 不是“不可逆对象”/);
   assert.match(page, /ONE → MANY/);
-  assert.match(page, /业务终止条件负责正常退出/);
-  assert.match(page, /Graph API：State \/ Nodes \/ Edges \/ super-steps/);
+  assert.match(page, /可以编译，但运行会在达到 recursion limit 时抛错/);
+  assert.match(page, /业务出口与 recursion limit 保险丝/);
+  assert.match(page, /官方 Graph API：compile 与执行模型/);
   assert.match(page, /window\.addEventListener\("hashchange", syncRoute\)/);
   assert.match(page, /new Worker\(new URL\("\.\/workers\/py-runner\.ts", import\.meta\.url\), \{ type: "module" \}\)/);
   assert.match(page, /Compile & Run/);
@@ -68,9 +79,13 @@ test("keeps the core technical boundaries explicit in source and styles", async 
 
   assert.match(css, /\.opening-prologue/);
   assert.match(css, /\.journey-list/);
-  assert.match(css, /\.validation-loop/);
+  assert.match(css, /\.weather-topology/);
+  assert.match(css, /\.hitl-boundary/);
+  assert.match(css, /\.loop-boundary/);
+  assert.match(css, /\.topology-point\.decision/);
+  assert.match(css, /\.topology-edge\.active/);
+  assert.match(css, /\.orchestration-cards/);
   assert.match(css, /\.ownership-grid/);
-  assert.match(css, /\.topology-grid/);
   assert.match(css, /\.trip-form/);
   assert.match(css, /\.runtime-inspector/);
   assert.match(css, /\.lesson-pagination/);
