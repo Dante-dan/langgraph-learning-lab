@@ -580,24 +580,24 @@ function SectionHeader({ section }: { section: typeof SECTIONS[number] }) {
     requestflow: "一次请求，如何真正进入 LangGraph",
     controlflow: "分支、验证与循环：程序如何改变顺序",
     concepts: "图的骨架：State、Node、Edge 与边界",
-    quickstart: "把刚才的天气 Agent 写成程序",
+    quickstart: "实现一个可运行的天气出行 Agent",
     dataflow: "数据怎样流转、序列化与恢复",
-    api: "API 不只是列表，而是调用时机",
+    api: "API 的职责与调用时机",
     toyagent: "Toy Agent：模型、工具、验证与循环",
     playground: "逐节点观察一次天气请求",
-    patterns: "架构模式：为什么这样选",
-    project: "把理解固化进公开 GitHub 项目",
+    patterns: "架构模式的适用条件与取舍",
+    project: "GitHub 学习项目与渐进练习",
   };
   const subtitles: Record<SectionKey, string> = {
-    roadmap: "先不背 API。我们让一条“公司到机场怎么走”的真实请求完整跑完，再从执行过程反推 LangGraph 的核心构件。",
+    roadmap: "课程从一条“公司到机场怎么走”的完整请求开始，沿执行过程建立 LangGraph 的核心心智模型。",
     requestflow: "拆开 POST、反序列化、invoke、START、节点更新与 HTTP 响应，明确每一层拿到的真实数据。",
     controlflow: "固定边表达顺序，条件边表达选择和回路；验证失败是否重试，由当前 State 与明确退出条件共同决定。",
-    concepts: "官方最小核心是 State、Node、Edge；在工程里还要补上执行边界、Reducer、compile、checkpoint 与 runtime context。",
+    concepts: "LangGraph 的图由 State、Node、Edge 构成；工程实现还涉及 Reducer、compile、checkpoint 与 runtime context。",
     quickstart: "先实现可验证的最小主路径，再加入天气分支、失败回路和最终 fallback。",
     dataflow: "从局部状态更新、Reducer 合并到 JSON 线格式与 checkpoint 恢复，追踪同一份数据的不同形态。",
     api: "把每个 API 放回调用现场：什么时候 invoke、什么时候 stream、什么时候需要 Command、Send 或 interrupt。",
     toyagent: "模型提出工具调用，运行时执行并观察，验证器决定继续还是结束；停止和业务完成是两件事。",
-    playground: "用可控场景逐步观察节点、条件边、State diff 和最终响应，不把预设动画伪装成真实代码执行。",
+    playground: "通过可控场景逐步观察节点、条件边、State diff 和最终响应，并直接运行可修改的代码。",
     patterns: "从确定性工作流到动态 Agent，比较每种架构的适用条件、代价与失败方式。",
     project: "把双语言示例、练习、答案和生产检查表都放进可运行、可验证的公开仓库。",
   };
@@ -886,9 +886,9 @@ function WeatherTopology({
 function OrchestrationBoundary({ onNavigate }: { onNavigate: (section: SectionKey) => void }) {
   return (
     <section className="opening-section orchestration-boundary">
-      <span className="section-kicker">PART 03 · 从完整图反推它能表达什么</span>
-      <h2>能画出来，不等于能可靠结束：拓扑能力和运行约束要分开</h2>
-      <p>LangGraph 官方示例明确覆盖 sequence、branch 和 loop。它使用有向图，但不要求是 DAG；真正需要防止的不是“出现环”，而是环没有业务停止条件。</p>
+      <span className="section-kicker">PART 03 · LangGraph 能表达的拓扑</span>
+      <h2>拓扑能力与终止条件</h2>
+      <p>LangGraph 使用支持 sequence、branch、merge 和 cycle 的有向图。循环路径需要业务停止条件，recursion limit 则负责在失控时中止运行。</p>
       <div className="orchestration-cards">
         <button type="button" onClick={() => onNavigate("controlflow")}>
           <span className="support-badge">SUPPORTED</span>
@@ -908,7 +908,7 @@ function OrchestrationBoundary({ onNavigate }: { onNavigate: (section: SectionKe
         <button type="button" className="invalid" onClick={() => onNavigate("controlflow")}>
           <span className="support-badge danger">INVALID RUN DESIGN</span>
           <div className="mini-topology mini-infinite" aria-hidden="true"><i className="mini-node a" /><i className="mini-node b" /><i className="mini-line top" /><i className="mini-line bottom" /><i className="mini-cross">×</i></div>
-          <h3>无停止条件的环</h3><p>它不是“无法定义的拓扑”：可以编译，但运行会在达到 recursion limit 时抛错，不能作为可完成流程交付。</p><b>查看保险丝与业务出口 →</b>
+          <h3>无停止条件的环</h3><p>该拓扑可以编译；由于没有业务出口，运行会持续推进，并在达到 recursion limit 后抛错。</p><b>查看保险丝与业务出口 →</b>
         </button>
       </div>
       <div className="direction-note"><strong>图上的左、右只是排版</strong><p>真正的“方向”是消息沿 Edge 激活下一 super-step。回边会再次执行旧节点，但不会穿越时间改写已经保存的 checkpoint。</p></div>
@@ -960,8 +960,8 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
     <>
       <section className="opening-prologue">
         <span className="section-kicker">贯穿案例 · WEATHER TRIP AGENT</span>
-        <h2>让我们先看懂一件事：它怎样把“天气”变成“出行决定”</h2>
-        <p className="opening-lede">假设明早 08:00，你要从上海公司赶到浦东机场。你打开一个天气出行 Agent，输入下面这句话。我们暂时不解释 StateGraph，也不先看图；先跟着这次请求，看系统怎样得到一个可以被验证的结果。</p>
+        <h2>天气如何转化为一份可验证的出行计划</h2>
+        <p className="opening-lede">假设明早 08:00，你要从上海公司赶到浦东机场，并向天气出行 Agent 输入下面这句话。以下依次展示这次请求的输入、调度、分支、验证与输出。</p>
         <blockquote>“明早从公司去浦东机场。如果下雨就不要走太多路；请给我路线、理由和备用方案。”</blockquote>
       </section>
 
@@ -987,7 +987,7 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
       </section>
 
       <div className="opening-post">
-        <div><span>第一步不是画 Graph，而是发送业务请求</span><strong>POST /api/trips/plan</strong><p>浏览器把表单序列化成 JSON；服务端拿到的是字节流。只有路由层完成解析和校验后，应用代码才会调用编译后的 graph。</p></div>
+        <div><span>浏览器发送业务请求</span><strong>POST /api/trips/plan</strong><p>浏览器把表单序列化成 JSON；服务端拿到的是字节流。路由层完成解析和校验后，应用代码调用编译后的 graph。</p></div>
         <pre>{`{
   "origin": "上海公司",
   "destination": "浦东机场",
@@ -999,9 +999,9 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
       </div>
 
       <section className="opening-section">
-        <span className="section-kicker">PART 01 · 先把业务流程完整跑一遍</span>
+        <span className="section-kicker">PART 01 · 一次业务请求的完整旅程</span>
         <h2>从点击“生成计划”到收到结果，依次发生什么？</h2>
-        <p>下面每一步都先说业务事实，再标出它属于应用代码还是 LangGraph 调度。读完这一段，你应该先能复述完整程序；后面的概念只是给这些步骤起名字。</p>
+        <p>每一步同时标明业务动作、所属层级和可观察数据，组成从用户输入到 HTTP 响应的完整程序。</p>
         <div className="journey-list">
           {journey.map((step) => (
             <button type="button" className={journey[selectedJourney][0] === step[0] ? "active" : ""} key={step[0]} onClick={() => setSelectedJourney(journey.indexOf(step))} aria-pressed={journey[selectedJourney][0] === step[0]}>
@@ -1025,7 +1025,7 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
         <div>
           <span className="section-kicker">图的路径与外部可见结果同步变化</span>
           <h2>{branch === "missing" ? "这次运行暂停了，还没有到 END" : "高亮路径最终收敛为一个可返回结果"}</h2>
-          <p>{branch === "missing" ? "应用层把 interrupt 信息呈现给用户；收到回答后，用同一个 thread_id 恢复，而不是重新伪造一次无关请求。" : "切换验证结果会让回边或 fallback 同步点亮。继续进入 Playground，还可以修改输入和双语言代码并实际执行。"}</p>
+          <p>{branch === "missing" ? "应用层展示 interrupt payload；收到回答后，以同一个 thread_id 和 Command(resume=...) 恢复该线程。" : "切换验证结果会让回边或 fallback 同步点亮。Playground 支持修改输入和双语言代码并直接执行。"}</p>
         </div>
         <pre>{JSON.stringify(branchResponse, null, 2)}</pre>
       </section>
@@ -1033,16 +1033,16 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
       <OrchestrationBoundary onNavigate={onNavigate} />
 
       <section className="opening-section official-position">
-        <span className="section-kicker">PART 04 · 到这里再问：LangGraph 在系统里究竟是什么？</span>
-        <h2>以官方定义为准：它是低层编排框架，也是长时、具状态 Agent 的运行时</h2>
-        <p>这不是把个人类比包装成定义。官方把 LangGraph 描述为用于构建、管理与部署长时、具状态 Agent 的 <strong>low-level orchestration framework and runtime</strong>，并强调它专注于 agent orchestration。</p>
+        <span className="section-kicker">PART 04 · LangGraph 在系统中的位置</span>
+        <h2>低层编排框架与长时、有状态 Agent 运行时</h2>
+        <p>LangGraph 的官方定位是用于构建、管理与部署长时、有状态 Agent 的 <strong>low-level orchestration framework and runtime</strong>。它专注于 agent orchestration，并提供 durable execution、streaming、human-in-the-loop 与 persistence 等能力。</p>
         <div className="official-definition-grid">
           <article><span>01 · StateGraph</span><h3>图定义的 Builder</h3><p>先声明 State schema，再添加 Nodes 与 Edges。它描述控制流，还不是 HTTP 服务。</p></article>
           <article><span>02 · compile()</span><h3>结构检查 + 运行能力装配</h3><p>官方说明 compile 会做基本结构检查，并在这里配置 checkpointer、interrupt 等运行参数。</p></article>
-          <article><span>03 · Compiled graph</span><h3>可 invoke / stream 的编排对象</h3><p>编译后才能使用。更准确的叫法是可执行的 compiled graph / Runnable，而不是“整个应用程序”。</p></article>
+          <article><span>03 · Compiled graph</span><h3>可 invoke / stream 的编排对象</h3><p><code>compile()</code> 返回可调用的 CompiledStateGraph / Runnable，应用层通过它启动运行或消费流式事件。</p></article>
         </div>
         <div className="ownership-grid">
-          <article><span>业务应用</span><h3>接请求，定义“什么算完成”</h3><p>HTTP、鉴权、天气规则、节点业务代码、验收标准、fallback 和响应字段都由你负责。</p></article>
+          <article><span>业务应用</span><h3>接请求，定义“什么算完成”</h3><p>HTTP、鉴权、天气规则、节点业务代码、验收标准、fallback 和响应字段由业务应用负责。</p></article>
           <article><span>LangGraph</span><h3>管理状态怎样沿图演化</h3><p>按 Edge 激活 Node、合并局部更新、执行 super-step，并提供 durable execution、streaming、HITL 与 persistence。</p></article>
           <article><span>外部基础设施</span><h3>提供真实能力</h3><p>天气 / 地图 API、LLM Provider、数据库、队列和观测系统不由 LangGraph 自动实现。</p></article>
         </div>
@@ -1050,20 +1050,20 @@ function Roadmap({ onNavigate }: { onNavigate: (section: SectionKey) => void }) 
       </section>
 
       <section className="opening-section concept-bridge">
-        <span className="section-kicker">PART 05 · 现在才给刚才看到的东西命名</span>
-        <h2>先只记三个角色：Node 做工作，Edge 决定下一步，State 保存当前共享快照</h2>
-        <p>这三个名称不是孤立词汇，它们分别对应刚才图里的实体。Reducer、checkpointer、runtime context 等相邻概念，等遇到“并行怎样合并”“暂停怎样恢复”时再展开。</p>
+        <span className="section-kicker">PART 05 · 图的三个核心构件</span>
+        <h2>Node 执行工作，Edge 决定下一步，State 保存共享快照</h2>
+        <p>上方拓扑中的执行函数、调度连线和状态更新分别对应 Node、Edge 与 State。Reducer、checkpointer 和 runtime context 进一步解决并行合并、暂停恢复与运行时依赖问题。</p>
         <div className="concept-triad">
           <button type="button" onClick={() => onNavigate("concepts")}><i className="concept-node-shape" /><span>NODE</span><h3>可被调度的函数</h3><p>读取当前 State，执行计算或副作用，返回局部更新。</p><b>深入 Node 边界 →</b></button>
           <button type="button" onClick={() => onNavigate("concepts")}><i className="concept-edge-shape" /><span>EDGE</span><h3>控制流与停止路径</h3><p>固定 Edge 表达顺序；Conditional Edge 根据 State 返回一个或多个目标。</p><b>深入 Edge 类型 →</b></button>
           <button type="button" onClick={() => onNavigate("dataflow")}><i className="concept-state-shape" /><span>STATE</span><h3>当前应用快照</h3><p>节点提交的是按 key 的更新；默认覆盖，也可以由 reducer 定义合并方式。</p><b>深入 State 与 Reducer →</b></button>
         </div>
-        <div className="concept-handoff"><strong>为什么概念页放在这里之后？</strong><span>因为你已经亲眼看到 State 被谁读取、Node 为什么分开、Edge 为什么需要条件和回边。下一章再讨论严格定义，就不再是背术语。</span><button type="button" onClick={() => onNavigate("concepts")}>进入“图的骨架与边界” →</button></div>
+        <div className="concept-handoff"><strong>继续拆解数据定义与系统边界</strong><span>“图的骨架与边界”将比较 State、Node、Edge、Reducer 与 checkpoint 的数据结构、职责范围和组合方式。</span><button type="button" onClick={() => onNavigate("concepts")}>进入“图的骨架与边界” →</button></div>
       </section>
 
       <section className="route-map">
-        <div className="section-kicker">接下来的教材路线 · 从这条请求逐层下钻</div>
-        <h2>现在有了全貌，再去拆请求、控制流、概念与代码</h2>
+        <div className="section-kicker">教材路线 · 沿一次请求逐层下钻</div>
+        <h2>从请求生命周期到生产架构</h2>
         <div className="route-steps">
           {SECTIONS.slice(1).map((item, index) => (
             <button type="button" className="route-step" onClick={() => onNavigate(item.key)} key={item.key}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.label}</strong><small>{item.duration}</small><b>打开章节 →</b></button>
@@ -1104,7 +1104,7 @@ function RequestFlow({ language, setLanguage }: { language: Language; setLanguag
   const [selectedStep, setSelectedStep] = useState(0);
   const selected = payloads[selectedStep];
   return <>
-    <div className="story-bridge"><span>CASE · STEP 01</span><strong>前端准备发送“公司到机场”的请求</strong><p>现在场景已经明确，我们再看技术链路。前端不是把数据直接塞进 START，而是先向服务端发送 <code>POST /api/trips/plan</code>；路由层解析、鉴权和校验后，才调用 graph。</p></div>
+    <div className="story-bridge"><span>CASE · STEP 01</span><strong>前端发送“公司到机场”的请求</strong><p>浏览器向服务端发送 <code>POST /api/trips/plan</code>。路由层完成解析、鉴权与校验，将请求映射为初始 State，再调用 graph；<code>START</code> 是图内入口，不是 HTTP 接口。</p></div>
     <div className="sequence-board">
       <div className="sequence-head"><span>REQUEST LIFECYCLE</span><span>一次请求像“地址栏输入网址”一样逐层展开</span></div>
       {steps.map((step, index) => <button type="button" className={`sequence-row ${selectedStep === index ? "active" : ""}`} onClick={() => setSelectedStep(index)} aria-pressed={selectedStep === index} key={step[0]}><span>{step[0]}</span><strong>{step[1]}</strong><b>{step[2]}</b><code>{step[3]}</code></button>)}
@@ -1159,14 +1159,14 @@ function ControlFlow({ language, setLanguage }: { language: Language; setLanguag
     <h2 className="section-title">Loop：回边很简单，可靠退出才是核心</h2>
     <div className="loop-line"><span>generate</span><b>→</b><span>evaluate</span><b>→ accepted / attempts ≥ 3 ?</b><span>END</span><em>NO ↺ generate</em></div>
     <CodeBlock name="loop" language={language} setLanguage={setLanguage} label="Evaluator–optimizer 有界循环" />
-    <div className="warning-callout"><strong>官方语义与工程替代</strong><span><code>recursionLimit</code> 是失控保险丝，不是业务出口。数组遍历、固定重试、分页读取通常留在普通函数或重试库里；只有每轮需要 checkpoint、动态路由、流式可见或人工介入时，才把循环画进图。</span></div>
+    <div className="warning-callout"><strong>循环的适用边界</strong><span><code>recursionLimit</code> 是失控保险丝，不是业务出口。数组遍历、固定重试、分页读取通常留在普通函数或重试库里；只有每轮需要 checkpoint、动态路由、流式可见或人工介入时，才把循环画进图。</span></div>
   </>;
 }
 
 function Quickstart({ language, setLanguage }: { language: Language; setLanguage: (l: Language) => void }) {
   return (
     <>
-      <div className="story-bridge"><span>CASE · STEP 03</span><strong>把刚才的故事写成第一个可运行程序</strong><p>先只保留最容易验证的主路径：接收出行输入 → 调 Open-Meteo → 生成路线 → 返回结果。运行通以后，再逐步加入分支、错误处理和 Agent 决策。</p></div>
+      <div className="story-bridge"><span>CASE · STEP 03</span><strong>实现天气出行 Agent 的最小主路径</strong><p>第一个版本接收出行输入、调用 Open-Meteo、生成路线并返回结果。主路径可运行后，再逐步加入分支、错误处理和 Agent 决策。</p></div>
       <div className="install-grid">
         <div><span className="step-no">01</span><h3>初始化</h3><code>{language === "python" ? "uv add langgraph langchain-openai" : "npm i @langchain/langgraph @langchain/openai zod"}</code></div>
         <div><span className="step-no">02</span><h3>定义状态</h3><p>先写数据契约，再写节点。把变化频率不同的数据拆成独立字段。</p></div>
@@ -1202,7 +1202,7 @@ function Concepts({ language, setLanguage }: { language: Language; setLanguage: 
     <>
       <section className="intro-grid">
         <div className="prose">
-          <h2>先给出严格定义，再讨论写法</h2>
+          <h2>State 与 Node 的数据定义和系统边界</h2>
           <p><strong>State</strong> 在数据上是 schema 约束的 key-value 集合；在业务上是一次执行可恢复的最小事实集。边界：不放 socket、模型客户端、数据库连接或无法可靠序列化的资源。</p>
           <p><strong>Node</strong> 在数据上是 <code>State → Partial&lt;State&gt;</code> 的同步/异步函数；在业务上是一个可命名、可测试、可重试的工作单元。边界：不要同时承担接入层、路由、展示层的全部职责。</p>
         </div>
@@ -1215,13 +1215,13 @@ function Concepts({ language, setLanguage }: { language: Language; setLanguage: 
       </div>
       <div className="state-node-answer">
         <div>
-          <span className="section-kicker">为什么 State 不放进某一个 Node 里？</span>
-          <h3>因为跨节点继续存在的事实，需要成为整张图可见的契约</h3>
+          <span className="section-kicker">共享 State 与 Node 局部变量的边界</span>
+          <h3>跨节点继续存在的事实属于整张图的共享契约</h3>
           <p>Node 内部可以有局部变量；但天气结果如果只藏在 <code>check_weather</code> 的闭包里，条件边、规划节点和 checkpointer 都读不到它。进入 State 的应该是后续步骤、恢复或审计仍需要的事实。</p>
         </div>
-        <div className="correction-card">
-          <strong>State 不是“不可逆对象”</strong>
-          <p>后续 Node 可以覆盖某个 key，Reducer 也可以合并多个更新；有环时旧 Node 还会再次运行。不会被原地篡改的是已经保存的历史 checkpoint。把这三件事区分开，才能理解 update、replay 与 loop。</p>
+        <div className="checkpoint-card">
+          <strong>State 更新与 Checkpoint 历史</strong>
+          <p>当前 State 的 key 可以由后续 Node 更新，也可以通过 Reducer 合并；回边还会再次执行旧 Node。Checkpointer 保存各个执行时刻的状态快照，供恢复、审计与重放使用。State 更新、历史快照和节点重放分别属于不同层次。</p>
         </div>
       </div>
       <h2 className="section-title">节点类型：同一种函数签名，不同的系统职责</h2>
@@ -1318,12 +1318,12 @@ function ToyAgent({ language, setLanguage }: { language: Language; setLanguage: 
   ];
   return <>
     <div className="fact-boundary">
-      <strong>事实边界：按键事件不等于 Agent turn</strong>
-      <p>Claude Code 的公开资料说明它有交互式 REPL、<code>UserPromptSubmit</code>、工具前后与停止等生命周期事件，但没有公开说明“每输入一个普通字符就调用 LLM 预测整句话”。因此这里把两种机制分开：输入中的补全属于终端/UI 层；按下回车提交 prompt，才进入可观察的 Agent loop。</p>
+      <strong>终端输入层与 Agent Turn</strong>
+      <p>普通按键先由交互式终端更新本地输入缓冲区和补全候选；提交整行 prompt 后，才进入 <code>UserPromptSubmit</code>、上下文装配、模型调用、工具执行与停止等 Agent 生命周期。以下流程以 Claude Code 已公开的生命周期接口为边界。</p>
     </div>
     <div className="keystroke-grid">
       <article><span>KEYSTROKE 1</span><h3>输入第一个字符</h3><p>本地输入缓冲区更新；若是 <code>/</code>、<code>@</code> 等特殊前缀，UI 可查询命令、文件或 MCP resource 的本地索引并显示候选。</p><code>buffer = &quot;@&quot;</code></article>
-      <article><span>KEYSTROKE 2…N</span><h3>继续输入</h3><p>候选列表根据新 buffer 重新过滤，旧候选被推翻。这可以完全由确定性 fuzzy search 完成，不必触发 LLM 或图节点。</p><code>candidates = filter(index, buffer)</code></article>
+      <article><span>KEYSTROKE 2…N</span><h3>继续输入</h3><p>候选列表随新 buffer 重新筛选；该过程可以完全由确定性 fuzzy search 完成，不必触发 LLM 或图节点。</p><code>candidates = filter(index, buffer)</code></article>
       <article><span>ENTER</span><h3>提交整行</h3><p>输入冻结为一条 UserMessage；触发提交生命周期、装配上下文并发起模型 turn。这里才进入模型—工具—观察循环。</p><code>agent.invoke({`{ messages: [prompt] }`})</code></article>
     </div>
     <section className="intro-grid">
@@ -1343,14 +1343,14 @@ function ToyAgent({ language, setLanguage }: { language: Language; setLanguage: 
     <div className="agent-sequence">
       <div><span>01</span><strong>Prompt submit</strong><p>整行文本成为 UserMessage；提交 hook 可以补充或拒绝输入。</p></div>
       <div><span>02</span><strong>Context assembly</strong><p>组合会话历史、项目指令、当前目录、允许的工具与必要文件。</p></div>
-      <div><span>03</span><strong>Model turn</strong><p>LLM 返回文本或结构化 tool_use。我们只依赖结果，不需要展开模型内部推理。</p></div>
+      <div><span>03</span><strong>Model turn</strong><p>LLM 返回文本或结构化 tool_use；编排层消费这些结果，不依赖模型内部推理过程。</p></div>
       <div><span>04</span><strong>Route + permission</strong><p>没有 tool call 就流式返回；有工具则匹配权限、参数 schema 与 PreToolUse 策略。</p></div>
       <div><span>05</span><strong>Execute + observe</strong><p>执行 Read/Edit/Bash/MCP，把 tool_result 和错误写回消息历史。</p></div>
       <div><span>06</span><strong>Verify + loop</strong><p>测试/类型检查/目标判定未通过则再次调用模型；完成或达到上限则停止。</p></div>
       <div><span>07</span><strong>Return</strong><p>文本与进度事件流向终端；本轮 transcript 与 session 状态可供恢复。</p></div>
       <div><span>08</span><strong>Memory</strong><p>会话上下文、checkpoint 与项目级持久指令分层保存，生命周期不同。</p></div>
     </div>
-    <p>这是一类工具 Agent 的可实现参考架构，不声称复刻 Claude Code 的未公开内部代码。官方可观察接口提供了 <code>stream-json</code>、<code>--max-turns</code>、权限配置、会话 resume，以及提交/工具/停止 hooks，正好对应输入、循环保险丝、验证与恢复这些系统边界。</p>
+    <p>Claude Code 类工具 Agent 可以按公开接口划分为输入提交、Agent loop、工具执行、验证、停止与会话恢复六个边界。<code>stream-json</code>、<code>--max-turns</code>、权限配置、resume 和生命周期 hooks 分别暴露这些边界。</p>
     <h2 className="section-title">每轮验证什么</h2>
     <div className="validation-grid">{checks.map((item) => <div key={item[0]}><strong>{item[0]}</strong><span>{item[1]}</span></div>)}</div>
     <h2 className="section-title">服务端参考架构：本地控制面 + 模型服务</h2>
@@ -1546,7 +1546,7 @@ function Playground({ language, setLanguage }: { language: Language; setLanguage
 
   return (
     <>
-      <div className="playground-note"><strong>这里会真实编译和执行</strong><span>TypeScript 在隔离 Worker 中编译；Python 使用官方 Pyodide WebAssembly Runtime。修改代码或场景输入会改变轨迹、State 和输出。浏览器版使用自包含 ToyGraph，正式 LangGraph 包示例仍在 GitHub 项目中本地运行。</span></div>
+      <div className="playground-note"><strong>浏览器执行环境</strong><span>TypeScript 代码在隔离 Worker 中编译运行；Python 代码由 Pyodide WebAssembly Runtime 执行。轨迹、State 和输出直接来自当前代码与场景输入。Playground 使用自包含 ToyGraph；GitHub 项目包含基于 LangGraph 包的完整示例。</span></div>
       <form className="trip-form" onSubmit={(submitEvent) => { submitEvent.preventDefault(); run(); }} aria-busy={running}>
         <label><span>起点</span><input value={input.origin} onChange={(change) => updateInput("origin", change.target.value)} /></label>
         <label><span>终点</span><input value={input.destination} onChange={(change) => updateInput("destination", change.target.value)} /></label>

@@ -44,18 +44,18 @@ test("server-renders the scenario-led weather-agent opening", async () => {
   assert.match(html, /适应宽度/);
   assert.match(html, /无停止条件的环/);
   assert.match(html, /INVALID RUN DESIGN/);
-  assert.match(html, /低层编排框架，也是长时、具状态 Agent 的运行时/);
-  assert.match(html, /先只记三个角色/);
-  assert.match(html, /有向图，但不要求是 DAG/);
+  assert.match(html, /低层编排框架与长时、有状态 Agent 运行时/);
+  assert.match(html, /Node 执行工作，Edge 决定下一步，State 保存共享快照/);
+  assert.match(html, /支持 sequence、branch、merge 和 cycle 的有向图/);
   assert.match(html, /href="#\/lesson\/requestflow"/);
   assert.match(html, /href="#\/playground\/weather"/);
   assert.match(html, /打开章节 →/);
 
-  const scenario = html.indexOf("让我们先看懂一件事");
+  const scenario = html.indexOf("天气如何转化为一份可验证的出行计划");
   const request = html.indexOf("POST /api/trips/plan");
   const topology = html.indexOf("条件变化时，节点与路径怎样一起变化");
-  const officialPosition = html.indexOf("低层编排框架，也是长时、具状态 Agent 的运行时");
-  const concepts = html.indexOf("先只记三个角色");
+  const officialPosition = html.indexOf("低层编排框架与长时、有状态 Agent 运行时");
+  const concepts = html.indexOf("Node 执行工作，Edge 决定下一步，State 保存共享快照");
   assert.ok(scenario >= 0 && request > scenario && topology > request && officialPosition > topology && concepts > officialPosition);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
@@ -71,15 +71,16 @@ test("keeps the core technical boundaries explicit in source and styles", async 
   assert.match(page, /new ResizeObserver\(applyFit\)/);
   assert.match(page, /Command\(resume=answer\)/);
   assert.match(page, /包含 interrupt 的.*节点会从函数开头重新执行/);
-  assert.match(page, /State 不是“不可逆对象”/);
+  assert.match(page, /State 更新与 Checkpoint 历史/);
   assert.match(page, /ONE → MANY/);
-  assert.match(page, /可以编译，但运行会在达到 recursion limit 时抛错/);
+  assert.match(page, /该拓扑可以编译.*达到 recursion limit 后抛错/);
   assert.match(page, /业务出口与 recursion limit 保险丝/);
   assert.match(page, /官方 Graph API：compile 与执行模型/);
   assert.match(page, /window\.addEventListener\("hashchange", syncRoute\)/);
   assert.match(page, /new Worker\(new URL\("\.\/workers\/py-runner\.ts", import\.meta\.url\), \{ type: "module" \}\)/);
   assert.match(page, /Compile & Run/);
   assert.doesNotMatch(page, /播放预设执行轨迹/);
+  assert.doesNotMatch(page, /个人类比|为什么概念页放在这里之后|State 不是“不可逆对象”|不声称复刻|我们暂时不解释|把刚才|先不背 API|更准确的叫法|这里会真实编译和执行/);
 
   assert.match(css, /\.opening-prologue/);
   assert.match(css, /\.journey-list/);
